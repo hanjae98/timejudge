@@ -213,10 +213,12 @@ export default function DashboardPage() {
                     backgroundColor: isCompleted ? '#E2E8F0' : isMirror ? 'rgba(37, 99, 235, 0.2)' : color.bg,
                 }}>
 
-                {/* Done Badge Overlay */}
+                {/* Ultra-Minimal Premium Feedback */}
                 {completedBadgeId === eventInfo.event.id && (
-                    <div className="absolute inset-0 z-[100] bg-emerald-500 border-none rounded-xl flex items-center justify-center animate-in zoom-in-95 fade-in duration-300">
-                        <span className="text-white font-black text-sm tracking-tight drop-shadow-sm">Done!</span>
+                    <div className="absolute inset-0 z-[100] flex items-center justify-center pointer-events-none">
+                        <div className="animate-in fade-in zoom-in-50 duration-500 ease-out flex items-center justify-center">
+                            <Check className="w-12 h-12 text-emerald-500/90 stroke-[1.5px] drop-shadow-[0_0_20px_rgba(16,185,129,0.3)] anim-checking" />
+                        </div>
                     </div>
                 )}
 
@@ -435,6 +437,15 @@ export default function DashboardPage() {
                     border-width: 5px 0 5px 6px !important;
                     border-top-color: transparent !important;
                     border-bottom-color: transparent !important;
+                }
+
+                @keyframes check-pop {
+                    0% { transform: scale(0.5); opacity: 0; }
+                    50% { transform: scale(1.1); opacity: 1; }
+                    100% { transform: scale(1); opacity: 0.8; }
+                }
+                .anim-checking {
+                    animation: check-pop 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
                 }
                 `}} />
         </div>
