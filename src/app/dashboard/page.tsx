@@ -4,7 +4,7 @@ import interactionPlugin from '@fullcalendar/interaction'
 import timeGridPlugin from '@fullcalendar/timegrid'
 import dayGridPlugin from '@fullcalendar/daygrid'
 import FullCalendar from '@fullcalendar/react'
-import { Calendar, Loader2, RefreshCw, Plus, Check } from 'lucide-react'
+import { Calendar, Loader2, RefreshCw, Plus, Check, Clock } from 'lucide-react'
 import { useTaskModalStore } from '@/store/calendar'
 import { useState, useEffect, useRef } from 'react'
 import TaskModal from '@/components/calendar/TaskModal'
@@ -17,16 +17,76 @@ export default function DashboardPage() {
     const [isSelecting, setIsSelecting] = useState(false)
     const mousePosRef = useRef({ x: 0, y: 0 })
     const hoverRef = useRef<HTMLDivElement>(null)
+    const calendarRef = useRef<FullCalendar>(null)
     const [completedBadgeId, setCompletedBadgeId] = useState<string | null>(null)
+    const [showScrollToNow, setShowScrollToNow] = useState(false)
+
+    const fetchEvents = async () => {
+        try {
+            const res = await fetch('/api/events')
+            const data = await res.json()
+            if (Array.isArray(data)) {
+                const formatted = data.map(block => {
+                    const title = block.task?.title || '할 일'
+                    const colors = [
+                        { bg: '#DBEAFE', text: '#1E40AF', border: '#3B82F6' },
+                        { bg: '#F3E8FF', text: '#6B21A8', border: '#A855F7' },
+                        { bg: '#D1FAE5', text: '#065F46', border: '#10B981' },
+                        { bg: '#FEF3C7', text: '#92400E', border: '#F59E0B' },
+                        { bg: '#FEE2E2', text: '#991B1B', border: '#EF4444' },
+                    ]
+                    const hash = title.split('').reduce((acc: number, char: string) => acc + char.charCodeAt(0), 0)
+                    const colorScheme = colors[hash % colors.length]
+
+                    return {
+                        id: block.id,
+                        title,
+                        start: block.start_time,
+                        end: block.end_time,
+                        extendedProps: { ...block, colorScheme }
+                    }
+                })
+                setEvents(formatted)
+            }
+        } catch (err) {
+            console.error('Failed to fetch events:', err)
+        } finally {
+            setLoading(false)
+        }
+    }
+
+    const scrollToNow = () => {
+        const api = calendarRef.current?.getApi()
+        if (api) {
+            const now = new Date()
+            const timeStr = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}:00`
+            api.scrollToTime(timeStr)
+            setShowScrollToNow(false)
+        }
+    }
+
+    async function handleAction(blockId: string, action: 'COMPLETE' | 'RESCHEDULE') {
+        if (action === 'COMPLETE') {
+            setCompletedBadgeId(blockId)
+            setTimeout(() => setCompletedBadgeId(null), 1500)
+        }
+        const res = await fetch('/api/reschedule', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ blockId, action })
+        })
+        if (res.ok) fetchEvents()
+    }
 
     useEffect(() => {
         fetchEvents()
     }, [])
 
+    // Hover Preview Listener
     useEffect(() => {
         const attachListeners = () => {
             const body = document.querySelector('.fc-timegrid-body')
-            if (!body) return
+            if (!body || loading) return
 
             let rafId: number
 
@@ -53,8 +113,6 @@ export default function DashboardPage() {
 
                 const sRect = firstSlot.getBoundingClientRect()
                 const slotHeight = sRect.height
-
-                // Fine-tuned relativeY calculation from the exact first slot
                 const relativeY = clientY - sRect.top
 
                 let activeColRect: DOMRect | null = null
@@ -65,7 +123,6 @@ export default function DashboardPage() {
 
                 if (activeColRect) {
                     const centerX = (activeColRect as DOMRect).left + (activeColRect as DOMRect).width / 2
-                    // Since relativeY starts from the first slot, slotIndex 0 is 07:00
                     const slotIndex = Math.floor(relativeY / slotHeight)
                     const snappedY = sRect.top + (slotIndex * slotHeight)
 
@@ -116,52 +173,39 @@ export default function DashboardPage() {
         return () => cleanup && cleanup()
     }, [isSelecting, isOpen, loading])
 
-    const fetchEvents = async () => {
-        try {
-            const res = await fetch('/api/events')
-            const data = await res.json()
-            if (Array.isArray(data)) {
-                const formatted = data.map(block => {
-                    const title = block.task?.title || '할 일'
-                    const colors = [
-                        { bg: '#DBEAFE', text: '#1E40AF', border: '#3B82F6' },
-                        { bg: '#F3E8FF', text: '#6B21A8', border: '#A855F7' },
-                        { bg: '#D1FAE5', text: '#065F46', border: '#10B981' },
-                        { bg: '#FEF3C7', text: '#92400E', border: '#F59E0B' },
-                        { bg: '#FEE2E2', text: '#991B1B', border: '#EF4444' },
-                    ]
-                    const hash = title.split('').reduce((acc: number, char: string) => acc + char.charCodeAt(0), 0)
-                    const colorScheme = colors[hash % colors.length]
+    // Initial Scroll and Viewport Monitoring
+    useEffect(() => {
+        if (loading) return;
 
-                    return {
-                        id: block.id,
-                        title,
-                        start: block.start_time,
-                        end: block.end_time,
-                        extendedProps: { ...block, colorScheme }
-                    }
-                })
-                setEvents(formatted)
+        const timer = setTimeout(() => {
+            const api = calendarRef.current?.getApi()
+            if (api) {
+                const now = new Date()
+                const hour = now.getHours()
+                // Default to showing current time +/- 2 hours
+                const scrollHour = Math.max(7, hour - 2)
+                const timeStr = `${scrollHour.toString().padStart(2, '0')}:00:00`
+                api.scrollToTime(timeStr)
             }
-        } catch (err) {
-            console.error('Failed to fetch events:', err)
-        } finally {
-            setLoading(false)
-        }
-    }
+        }, 800)
 
-    async function handleAction(blockId: string, action: 'COMPLETE' | 'RESCHEDULE') {
-        if (action === 'COMPLETE') {
-            setCompletedBadgeId(blockId)
-            setTimeout(() => setCompletedBadgeId(null), 1500)
+        const handleCalendarScroll = (e: any) => {
+            const scrollEl = e.target
+            if (scrollEl.classList.contains('fc-scroller')) {
+                const now = new Date()
+                const api = calendarRef.current?.getApi()
+                // Simple distance check: if more than 300px away from the "would be" now scroll position
+                // (This is a heuristic, better to check if nowIndicator is in viewport but that's complex)
+                setShowScrollToNow(scrollEl.scrollTop > 1000 || scrollEl.scrollTop < 100)
+            }
         }
-        const res = await fetch('/api/reschedule', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ blockId, action })
-        })
-        if (res.ok) fetchEvents()
-    }
+
+        window.addEventListener('scroll', handleCalendarScroll, true)
+        return () => {
+            clearTimeout(timer)
+            window.removeEventListener('scroll', handleCalendarScroll, true)
+        }
+    }, [loading])
 
     function renderDayHeader(headerInfo: any) {
         const isToday = headerInfo.isToday
@@ -179,12 +223,16 @@ export default function DashboardPage() {
     }
 
     function renderEventContent(eventInfo: any) {
+        const now = new Date()
+        const start = new Date(eventInfo.event.start)
+        const end = new Date(eventInfo.event.end)
+        const isCurrent = start <= now && end >= now
         const isCompleted = eventInfo.event.extendedProps.is_completed
         const color = eventInfo.event.extendedProps.colorScheme || { bg: '#DBEAFE', text: '#1E40AF', border: '#3B82F6' }
         const isMirror = eventInfo.isMirror
         const isSelection = isMirror && !eventInfo.event.id
 
-        const durationMs = (eventInfo.event.end?.getTime() || 0) - (eventInfo.event.start?.getTime() || 0)
+        const durationMs = end.getTime() - start.getTime()
         const isShort = durationMs <= 30 * 60 * 1000
 
         let displayStart = eventInfo.event.start
@@ -208,10 +256,20 @@ export default function DashboardPage() {
                 ${isCompleted ? 'grayscale opacity-80' : 'shadow-sm'}
                 ${isSelection ? 'bg-blue-400/20' : ''}
                 ${isShort ? 'p-1.5' : 'p-3'}
+                ${isCurrent && !isCompleted ? 'ring-2 ring-emerald-500 ring-offset-2 shadow-[0_0_20px_rgba(16,185,129,0.4)]' : ''}
             `}
                 style={{
-                    backgroundColor: isCompleted ? '#E2E8F0' : isMirror ? 'rgba(37, 99, 235, 0.2)' : color.bg,
+                    backgroundColor: isCurrent && !isCompleted ? '#ECFDF5' : (isCompleted ? '#E2E8F0' : (isMirror ? 'rgba(37, 99, 235, 0.2)' : color.bg)),
                 }}>
+
+                {isCurrent && !isCompleted && (
+                    <div className="absolute top-0 right-0 p-1">
+                        <span className="flex h-2 w-2 relative">
+                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                            <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                        </span>
+                    </div>
+                )}
 
                 {/* Ultra-Minimal Premium Feedback */}
                 {completedBadgeId === eventInfo.event.id && (
@@ -308,14 +366,26 @@ export default function DashboardPage() {
                 </header>
 
                 <main className="flex-1 flex flex-col lg:flex-row gap-8 min-h-0">
-                    <div className="flex-1 glass rounded-[40px] overflow-hidden flex flex-col relative border-white shadow-2xl">
+                    <div className="flex-1 glass rounded-[40px] overflow-hidden flex flex-col relative border-white shadow-2xl h-[700px]">
                         {loading && (
                             <div className="absolute inset-0 z-50 bg-white/60 backdrop-blur-md flex items-center justify-center">
                                 <Loader2 className="w-12 h-12 text-blue-600 animate-spin" />
                             </div>
                         )}
-                        <div className="flex-1 p-4 md:p-6 overflow-auto custom-scrollbar">
+
+                        {showScrollToNow && (
+                            <button
+                                onClick={scrollToNow}
+                                className="absolute bottom-10 left-1/2 -translate-x-1/2 z-[40] bg-blue-600 text-white px-6 py-3 rounded-full font-black shadow-2xl hover:bg-blue-700 transition-all animate-in slide-in-from-bottom-4 flex items-center gap-2"
+                            >
+                                <Clock className="w-4 h-4" />
+                                Return to Now
+                            </button>
+                        )}
+
+                        <div className="flex-1 p-4 md:p-6 overflow-auto custom-scrollbar fc-viewport-mask h-full">
                             <FullCalendar
+                                ref={calendarRef}
                                 plugins={[dayGridPlugin, timeGridPlugin, interactionPlugin]}
                                 initialView="timeGridWeek"
                                 firstDay={1}
@@ -324,7 +394,7 @@ export default function DashboardPage() {
                                     center: 'title',
                                     right: 'timeGridWeek,timeGridDay'
                                 }}
-                                height="auto"
+                                height="100%"
                                 stickyHeaderDates={true}
                                 events={events}
                                 editable={true}
@@ -429,15 +499,28 @@ export default function DashboardPage() {
                 }
 
                 .fc-now-indicator-line {
-                    border-color: #3b82f6 !important;
-                    border-top-width: 2px !important;
+                    border-color: #10b981 !important;
+                    border-top-width: 3px !important;
+                    box-shadow: 0 0 10px rgba(16, 185, 129, 0.4);
                 }
                 .fc-now-indicator-arrow {
-                    border-color: #3b82f6 !important;
-                    border-width: 5px 0 5px 6px !important;
+                    border-color: #10b981 !important;
+                    border-width: 6px 0 6px 8px !important;
                     border-top-color: transparent !important;
                     border-bottom-color: transparent !important;
                 }
+
+                .fc-viewport-mask {
+                    mask-image: linear-gradient(to bottom, transparent, black 15%, black 85%, transparent);
+                    -webkit-mask-image: linear-gradient(to bottom, transparent, black 15%, black 85%, transparent);
+                }
+
+                .fc-scroller {
+                    scrollbar-width: none !important;
+                    scroll-behavior: smooth !important;
+                    overscroll-behavior: contain;
+                }
+                .fc-scroller::-webkit-scrollbar { display: none !important; }
 
                 @keyframes check-pop {
                     0% { transform: scale(0.5); opacity: 0; }
