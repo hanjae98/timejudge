@@ -15,6 +15,7 @@ export default function DashboardPage() {
     const [events, setEvents] = useState<any[]>([])
     const [loading, setLoading] = useState(true)
     const [isSelecting, setIsSelecting] = useState(false)
+    const mousePosRef = useRef({ x: 0, y: 0 })
     const hoverRef = useRef<HTMLDivElement>(null)
 
     useEffect(() => {
@@ -26,28 +27,43 @@ export default function DashboardPage() {
             const body = document.querySelector('.fc-timegrid-body')
             if (!body) return
 
-            const handleMouseMove = (e: MouseEvent) => {
+            let rafId: number
+
+            const updateHover = () => {
+                const { x: clientX, y: clientY } = mousePosRef.current
+
                 if ((isSelecting || isOpen) && hoverRef.current) {
                     hoverRef.current.style.opacity = '0'
                     return
                 }
 
+                // Don't show if over an event box
+                const target = document.elementFromPoint(clientX, clientY)
+                if (target?.closest('.fc-event')) {
+                    if (hoverRef.current) hoverRef.current.style.opacity = '0'
+                    return
+                }
+
                 const slots = document.querySelector('.fc-timegrid-slots')
                 const cols = document.querySelectorAll('.fc-timegrid-col')
-                if (!slots || cols.length === 0 || !hoverRef.current) return
+                const firstSlot = document.querySelector('.fc-timegrid-slot')
+                if (!slots || cols.length === 0 || !hoverRef.current || !firstSlot) return
 
-                const sRect = slots.getBoundingClientRect()
-                const relativeY = e.clientY - sRect.top
+                const sRect = firstSlot.getBoundingClientRect()
+                const slotHeight = sRect.height
+
+                // Fine-tuned relativeY calculation from the exact first slot
+                const relativeY = clientY - sRect.top
 
                 let activeColRect: DOMRect | null = null
                 cols.forEach(col => {
                     const r = col.getBoundingClientRect()
-                    if (e.clientX >= r.left && e.clientX <= r.right) activeColRect = r
+                    if (clientX >= r.left && clientX <= r.right) activeColRect = r
                 })
 
                 if (activeColRect) {
                     const centerX = (activeColRect as DOMRect).left + (activeColRect as DOMRect).width / 2
-                    const slotHeight = 20
+                    // Since relativeY starts from the first slot, slotIndex 0 is 07:00
                     const slotIndex = Math.floor(relativeY / slotHeight)
                     const snappedY = sRect.top + (slotIndex * slotHeight)
 
@@ -56,8 +72,7 @@ export default function DashboardPage() {
 
                     if (hour >= 7 && hour < 25) {
                         hoverRef.current.innerText = `${hour.toString().padStart(2, '0')}:${min.toString().padStart(2, '0')}`
-                        hoverRef.current.style.left = `${centerX}px`
-                        hoverRef.current.style.top = `${snappedY - 4}px`
+                        hoverRef.current.style.transform = `translate3d(${centerX}px, ${snappedY}px, 0) translate(-50%, -100%)`
                         hoverRef.current.style.opacity = '1'
                     } else {
                         hoverRef.current.style.opacity = '0'
@@ -67,15 +82,29 @@ export default function DashboardPage() {
                 }
             }
 
+            const handleMouseMove = (e: MouseEvent) => {
+                mousePosRef.current = { x: e.clientX, y: e.clientY }
+                cancelAnimationFrame(rafId)
+                rafId = requestAnimationFrame(updateHover)
+            }
+
+            const handleScroll = () => {
+                cancelAnimationFrame(rafId)
+                rafId = requestAnimationFrame(updateHover)
+            }
+
             const handleMouseDown = () => setIsSelecting(true)
             const handleMouseUp = () => setIsSelecting(false)
 
             window.addEventListener('mousemove', handleMouseMove)
+            window.addEventListener('scroll', handleScroll, true)
             body.addEventListener('mousedown', handleMouseDown)
             window.addEventListener('mouseup', handleMouseUp)
 
             return () => {
+                cancelAnimationFrame(rafId)
                 window.removeEventListener('mousemove', handleMouseMove)
+                window.removeEventListener('scroll', handleScroll, true)
                 body.removeEventListener('mousedown', handleMouseDown)
                 window.removeEventListener('mouseup', handleMouseUp)
             }
@@ -212,7 +241,7 @@ export default function DashboardPage() {
                                     absolute top-1 right-1 transition-all duration-300 flex items-center justify-center
                                     ${isCompleted
                                         ? 'text-emerald-500 scale-110 opacity-100'
-                                        : 'text-slate-400 opacity-20 group-hover/event:opacity-100 group-hover/event:text-emerald-500 hover:scale-125'
+                                        : 'text-slate-400 opacity-20 group-hover/event:opacity-100 hover:text-emerald-500 hover:scale-125'
                                     }
                                 `}
                             >
@@ -231,7 +260,7 @@ export default function DashboardPage() {
             <div
                 ref={hoverRef}
                 className="fixed pointer-events-none z-[9999] bg-white border border-blue-200 px-2.5 py-1.5 rounded-xl text-[10px] font-black text-blue-600 shadow-2xl opacity-0 will-change-transform"
-                style={{ left: 0, top: 0 }}
+                style={{ left: 0, top: 0, transition: 'opacity 0.1s ease-out' }}
             />
 
             <div className="max-w-[1600px] mx-auto w-full flex flex-col flex-1 p-6 md:p-10 gap-8 z-10">
