@@ -4,7 +4,7 @@ import interactionPlugin from '@fullcalendar/interaction'
 import timeGridPlugin from '@fullcalendar/timegrid'
 import dayGridPlugin from '@fullcalendar/daygrid'
 import FullCalendar from '@fullcalendar/react'
-import { Calendar, Loader2, RefreshCw, Plus, Check, Clock } from 'lucide-react'
+import { Calendar, Loader2, RefreshCw, Plus, Check, Clock, ArrowUp, ArrowDown } from 'lucide-react'
 import { useTaskModalStore } from '@/store/calendar'
 import { useState, useEffect, useRef } from 'react'
 import TaskModal from '@/components/calendar/TaskModal'
@@ -20,6 +20,7 @@ export default function DashboardPage() {
     const calendarRef = useRef<FullCalendar>(null)
     const [completedBadgeId, setCompletedBadgeId] = useState<string | null>(null)
     const [showScrollToNow, setShowScrollToNow] = useState(false)
+    const [scrollAlignment, setScrollAlignment] = useState<'up' | 'down'>('up')
 
     const fetchEvents = async () => {
         try {
@@ -59,7 +60,9 @@ export default function DashboardPage() {
         const api = calendarRef.current?.getApi()
         if (api) {
             const now = new Date()
-            const timeStr = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}:00`
+            const hour = now.getHours()
+            const scrollHour = Math.max(0, hour - 2)
+            const timeStr = `${scrollHour.toString().padStart(2, '0')}:00:00`
             api.scrollToTime(timeStr)
             setShowScrollToNow(false)
         }
@@ -78,133 +81,137 @@ export default function DashboardPage() {
         if (res.ok) fetchEvents()
     }
 
+    // Initialize
     useEffect(() => {
         fetchEvents()
     }, [])
 
-    // Hover Preview Listener
+    // Hover Preview & Scroll Monitoring
     useEffect(() => {
-        const attachListeners = () => {
-            const body = document.querySelector('.fc-timegrid-body')
-            if (!body || loading) return
+        const body = document.querySelector('.fc-timegrid-body')
+        if (!body || loading) return
 
-            let rafId: number
+        let rafId: number
 
-            const updateHover = () => {
-                const { x: clientX, y: clientY } = mousePosRef.current
+        const updateHover = () => {
+            const { x: clientX, y: clientY } = mousePosRef.current
+            if (isOpen && hoverRef.current) {
+                hoverRef.current.style.opacity = '0'
+                return
+            }
 
-                if (isOpen && hoverRef.current) {
-                    hoverRef.current.style.opacity = '0'
-                    return
-                }
+            const target = document.elementFromPoint(clientX, clientY)
+            const eventBox = target?.closest('.fc-event')
+            if (eventBox && !eventBox.classList.contains('fc-event-mirror') && !eventBox.classList.contains('fc-highlight')) {
+                if (hoverRef.current) hoverRef.current.style.opacity = '0'
+                return
+            }
 
-                // Don't show if over an existing event box (but allow if it's a mirror/selection)
-                const target = document.elementFromPoint(clientX, clientY)
-                const eventBox = target?.closest('.fc-event')
-                if (eventBox && !eventBox.classList.contains('fc-event-mirror') && !eventBox.classList.contains('fc-highlight')) {
-                    if (hoverRef.current) hoverRef.current.style.opacity = '0'
-                    return
-                }
+            const slots = document.querySelector('.fc-timegrid-slots')
+            const cols = document.querySelectorAll('.fc-timegrid-col')
+            const firstSlot = document.querySelector('.fc-timegrid-slot')
+            if (!slots || cols.length === 0 || !hoverRef.current || !firstSlot) return
 
-                const slots = document.querySelector('.fc-timegrid-slots')
-                const cols = document.querySelectorAll('.fc-timegrid-col')
-                const firstSlot = document.querySelector('.fc-timegrid-slot')
-                if (!slots || cols.length === 0 || !hoverRef.current || !firstSlot) return
+            const sRect = firstSlot.getBoundingClientRect()
+            const slotHeight = sRect.height
+            const relativeY = clientY - sRect.top
 
-                const sRect = firstSlot.getBoundingClientRect()
-                const slotHeight = sRect.height
-                const relativeY = clientY - sRect.top
+            let activeColRect: DOMRect | null = null
+            cols.forEach(col => {
+                const r = col.getBoundingClientRect()
+                if (clientX >= r.left && clientX <= r.right) activeColRect = r
+            })
 
-                let activeColRect: DOMRect | null = null
-                cols.forEach(col => {
-                    const r = col.getBoundingClientRect()
-                    if (clientX >= r.left && clientX <= r.right) activeColRect = r
-                })
+            if (activeColRect) {
+                const centerX = (activeColRect as DOMRect).left + (activeColRect as DOMRect).width / 2
+                const slotIndex = Math.floor(relativeY / slotHeight)
+                const snappedY = sRect.top + (slotIndex * slotHeight)
 
-                if (activeColRect) {
-                    const centerX = (activeColRect as DOMRect).left + (activeColRect as DOMRect).width / 2
-                    const slotIndex = Math.floor(relativeY / slotHeight)
-                    const snappedY = sRect.top + (slotIndex * slotHeight)
+                const hour = Math.floor(slotIndex / 4)
+                const min = (slotIndex % 4) * 15
 
-                    const hour = Math.floor(slotIndex / 4)
-                    const min = (slotIndex % 4) * 15
-
-                    if (hour >= 0 && hour < 24) {
-                        hoverRef.current.innerText = `${hour.toString().padStart(2, '0')}:${min.toString().padStart(2, '0')}`
-                        hoverRef.current.style.transform = `translate3d(${centerX}px, ${snappedY}px, 0) translate(-50%, -100%)`
-                        hoverRef.current.style.opacity = '1'
-                    } else {
-                        hoverRef.current.style.opacity = '0'
-                    }
+                if (hour >= 0 && hour < 24) {
+                    hoverRef.current.innerText = `${hour.toString().padStart(2, '0')}:${min.toString().padStart(2, '0')}`
+                    hoverRef.current.style.transform = `translate3d(${centerX}px, ${snappedY}px, 0) translate(-50%, -100%)`
+                    hoverRef.current.style.opacity = '1'
                 } else {
                     hoverRef.current.style.opacity = '0'
                 }
-            }
-
-            const handleMouseMove = (e: MouseEvent) => {
-                mousePosRef.current = { x: e.clientX, y: e.clientY }
-                cancelAnimationFrame(rafId)
-                rafId = requestAnimationFrame(updateHover)
-            }
-
-            const handleScroll = () => {
-                cancelAnimationFrame(rafId)
-                rafId = requestAnimationFrame(updateHover)
-            }
-
-            const handleMouseDown = () => setIsSelecting(true)
-            const handleMouseUp = () => setIsSelecting(false)
-
-            window.addEventListener('mousemove', handleMouseMove)
-            window.addEventListener('scroll', handleScroll, true)
-            body.addEventListener('mousedown', handleMouseDown)
-            window.addEventListener('mouseup', handleMouseUp)
-
-            return () => {
-                cancelAnimationFrame(rafId)
-                window.removeEventListener('mousemove', handleMouseMove)
-                window.removeEventListener('scroll', handleScroll, true)
-                body.removeEventListener('mousedown', handleMouseDown)
-                window.removeEventListener('mouseup', handleMouseUp)
+            } else {
+                hoverRef.current.style.opacity = '0'
             }
         }
 
-        const cleanup = attachListeners()
-        return () => cleanup && cleanup()
+        const handleCalendarScroll = (e: any) => {
+            const scrollEl = e.target
+            if (scrollEl.classList.contains('fc-scroller')) {
+                // Time-based visibility check instead of finicky DOM polling
+                const now = new Date()
+                const nowHour = now.getHours()
+                const nowMin = now.getMinutes()
+
+                const firstSlot = scrollEl.querySelector('.fc-timegrid-slot')
+                if (!firstSlot) return
+
+                const slotHeight = firstSlot.getBoundingClientRect().height
+                const nowPos = (nowHour * 4 + (nowMin / 15)) * slotHeight
+
+                const currentScroll = scrollEl.scrollTop
+                const viewportHeight = scrollEl.clientHeight
+
+                // Buffer to consider "Now" as visible: within 100px from edges
+                const isVisible = (nowPos >= currentScroll + 80 && nowPos <= currentScroll + viewportHeight - 80)
+
+                setShowScrollToNow(!isVisible)
+                if (!isVisible) {
+                    setScrollAlignment(nowPos < currentScroll + (viewportHeight / 2) ? 'up' : 'down')
+                }
+            }
+        }
+
+        const handleMouseMove = (e: MouseEvent) => {
+            mousePosRef.current = { x: e.clientX, y: e.clientY }
+            cancelAnimationFrame(rafId)
+            rafId = requestAnimationFrame(updateHover)
+        }
+
+        const handleScroll = () => {
+            cancelAnimationFrame(rafId)
+            rafId = requestAnimationFrame(updateHover)
+        }
+
+        const handleMouseDown = () => setIsSelecting(true)
+        const handleMouseUp = () => setIsSelecting(false)
+
+        window.addEventListener('mousemove', handleMouseMove)
+        window.addEventListener('scroll', handleScroll, true)
+        window.addEventListener('scroll', handleCalendarScroll, true)
+        body.addEventListener('mousedown', handleMouseDown)
+        window.addEventListener('mouseup', handleMouseUp)
+
+        return () => {
+            cancelAnimationFrame(rafId)
+            window.removeEventListener('mousemove', handleMouseMove)
+            window.removeEventListener('scroll', handleScroll, true)
+            window.removeEventListener('scroll', handleCalendarScroll, true)
+            body.removeEventListener('mousedown', handleMouseDown)
+            window.removeEventListener('mouseup', handleMouseUp)
+        }
     }, [isSelecting, isOpen, loading])
 
-    // Initial Scroll and Viewport Monitoring
+    // Initial Scroll
     useEffect(() => {
         if (loading) return;
-
         const timer = setTimeout(() => {
             const api = calendarRef.current?.getApi()
             if (api) {
                 const now = new Date()
                 const hour = now.getHours()
-                // Center the current hour (show 2 hours before)
                 const scrollHour = Math.max(0, hour - 2)
-                const timeStr = `${scrollHour.toString().padStart(2, '0')}:00:00`
-                api.scrollToTime(timeStr)
+                api.scrollToTime(`${scrollHour.toString().padStart(2, '0')}:00:00`)
             }
         }, 800)
-
-        const handleCalendarScroll = (e: any) => {
-            const scrollEl = e.target
-            if (scrollEl.classList.contains('fc-scroller')) {
-                const now = new Date()
-                const api = calendarRef.current?.getApi()
-                // Simple distance check: if more than 300px away from the "would be" now scroll position
-                // (This is a heuristic, better to check if nowIndicator is in viewport but that's complex)
-                setShowScrollToNow(scrollEl.scrollTop > 1000 || scrollEl.scrollTop < 100)
-            }
-        }
-
-        window.addEventListener('scroll', handleCalendarScroll, true)
-        return () => {
-            clearTimeout(timer)
-            window.removeEventListener('scroll', handleCalendarScroll, true)
-        }
+        return () => clearTimeout(timer)
     }, [loading])
 
     function renderDayHeader(headerInfo: any) {
@@ -271,7 +278,6 @@ export default function DashboardPage() {
                     </div>
                 )}
 
-                {/* Ultra-Minimal Premium Feedback */}
                 {completedBadgeId === eventInfo.event.id && (
                     <div className="absolute inset-0 z-[100] flex items-center justify-center pointer-events-none">
                         <div className="animate-in fade-in zoom-in-50 duration-500 ease-out flex items-center justify-center">
@@ -329,7 +335,6 @@ export default function DashboardPage() {
 
     return (
         <div className="min-h-screen flex flex-col relative bg-slate-50 text-slate-900 selection:bg-blue-500/20">
-            {/* Ultra-Smooth Hover Preview */}
             <div
                 ref={hoverRef}
                 className="fixed pointer-events-none z-[9999] bg-white border border-blue-200 px-2.5 py-1.5 rounded-xl text-[10px] font-black text-blue-600 shadow-2xl opacity-0 will-change-transform"
@@ -379,7 +384,11 @@ export default function DashboardPage() {
                                 className="absolute bottom-6 right-6 z-[40] bg-blue-600 text-white w-12 h-12 rounded-full font-black shadow-2xl hover:bg-blue-700 transition-all hover:scale-110 active:scale-95 animate-in fade-in zoom-in slide-in-from-bottom-4 flex items-center justify-center group"
                                 title="Return to Now"
                             >
-                                <Clock className="w-6 h-6 group-hover:rotate-12 transition-transform" />
+                                {scrollAlignment === 'up' ? (
+                                    <ArrowUp className="w-6 h-6 animate-bounce" />
+                                ) : (
+                                    <ArrowDown className="w-6 h-6 animate-bounce" />
+                                )}
                             </button>
                         )}
 
