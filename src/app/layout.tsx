@@ -16,9 +16,12 @@ export default function RootLayout({
   children: React.ReactNode
 }>) {
   return (
-    <html lang="ko">
-      <body className={clsx(inter.variable, 'font-sans antialiased text-gray-900 bg-white')}>
-        {children}
+    <html lang="ko" className="dark">
+      <body className={clsx(inter.variable, 'font-sans antialiased text-slate-200 bg-slate-950 min-h-screen')}>
+        <div className="mesh-bg" />
+        <div className="relative z-10 w-full min-h-screen">
+          {children}
+        </div>
       </body>
     </html>
   )
