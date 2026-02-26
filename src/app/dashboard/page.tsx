@@ -32,14 +32,15 @@ export default function DashboardPage() {
             const updateHover = () => {
                 const { x: clientX, y: clientY } = mousePosRef.current
 
-                if ((isSelecting || isOpen) && hoverRef.current) {
+                if (isOpen && hoverRef.current) {
                     hoverRef.current.style.opacity = '0'
                     return
                 }
 
-                // Don't show if over an event box
+                // Don't show if over an existing event box (but allow if it's a mirror/selection)
                 const target = document.elementFromPoint(clientX, clientY)
-                if (target?.closest('.fc-event')) {
+                const eventBox = target?.closest('.fc-event')
+                if (eventBox && !eventBox.classList.contains('fc-event-mirror') && !eventBox.classList.contains('fc-highlight')) {
                     if (hoverRef.current) hoverRef.current.style.opacity = '0'
                     return
                 }
@@ -323,7 +324,7 @@ export default function DashboardPage() {
                                 slotMaxTime="25:00:00"
                                 slotDuration="00:15:00"
                                 slotLabelInterval="01:00:00"
-                                snapDuration="00:01:00"
+                                snapDuration="00:05:00"
                                 selectMinDistance={1}
                                 eventMinHeight={20}
                                 eventOverlap={false}
