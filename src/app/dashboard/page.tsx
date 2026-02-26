@@ -4,9 +4,9 @@ import interactionPlugin from '@fullcalendar/interaction'
 import timeGridPlugin from '@fullcalendar/timegrid'
 import dayGridPlugin from '@fullcalendar/daygrid'
 import FullCalendar from '@fullcalendar/react'
-import { Calendar, Loader2, RefreshCw, Plus, Check, Clock, ArrowUp, ArrowDown } from 'lucide-react'
-import { useTaskModalStore } from '@/store/calendar'
-import { useState, useEffect, useRef } from 'react'
+import { Calendar, Loader2, RefreshCw, Plus, Check, Clock, ArrowUp, ArrowDown, Sparkles, X, MousePointer2, Layers, Lock, Unlock, CalendarRange } from 'lucide-react'
+import { useTaskModalStore, TaskRange } from '@/store/calendar'
+import { useState, useEffect, useRef, useMemo } from 'react'
 import TaskModal from '@/components/calendar/TaskModal'
 import TaskInbox from '@/components/calendar/TaskInbox'
 
@@ -21,6 +21,11 @@ export default function DashboardPage() {
     const [completedBadgeId, setCompletedBadgeId] = useState<string | null>(null)
     const [showScrollToNow, setShowScrollToNow] = useState(false)
     const [scrollAlignment, setScrollAlignment] = useState<'up' | 'down'>('up')
+
+    // UI Transformation States
+    const [isLocked, setIsLocked] = useState(true)
+    const [selectedRanges, setSelectedRanges] = useState<TaskRange[]>([])
+    const [isMultiSelectMode, setIsMultiSelectMode] = useState(false)
 
     const fetchEvents = async () => {
         try {
@@ -56,13 +61,28 @@ export default function DashboardPage() {
         }
     }
 
+    // Combine Real Events + Selection Highlights
+    const allEvents = useMemo(() => {
+        const selectionHighlights = selectedRanges.map((range, idx) => ({
+            id: `selection-${idx}`,
+            start: range.start,
+            end: range.end,
+            display: 'block',
+            backgroundColor: 'rgba(59, 130, 246, 0.4)',
+            borderColor: '#3B82F6',
+            textColor: '#fff',
+            title: `Selection ${idx + 1}`,
+            classNames: ['selection-highlight-event'],
+            editable: false
+        }))
+        return [...events, ...selectionHighlights]
+    }, [events, selectedRanges])
+
     const scrollToNow = () => {
         const api = calendarRef.current?.getApi()
         if (api) {
             const now = new Date()
-            const hour = now.getHours()
-            // Center 'now' by scrolling to 2 hours before it
-            const scrollHour = Math.max(0, hour - 2)
+            const scrollHour = Math.max(0, now.getHours() - 2)
             api.scrollToTime(`${scrollHour.toString().padStart(2, '0')}:00:00`)
             setShowScrollToNow(false)
         }
@@ -85,7 +105,6 @@ export default function DashboardPage() {
         fetchEvents()
     }, [])
 
-    // Hybrid Deterministic Scroll Monitoring
     useEffect(() => {
         const body = document.querySelector('.fc-timegrid-body')
         if (!body || loading) return
@@ -94,44 +113,23 @@ export default function DashboardPage() {
 
         const handleCalendarScroll = (e: any) => {
             const scrollEl = e.target as HTMLElement
-            // Only care about the core grid scroller (the large one)
             if (!scrollEl.classList.contains('fc-scroller') || scrollEl.clientHeight < 300) return
 
-            const now = new Date()
             const nowIndicator = scrollEl.querySelector('.fc-now-indicator-line') as HTMLElement
-
             if (nowIndicator) {
                 const scrollerRect = scrollEl.getBoundingClientRect()
                 const indicatorRect = nowIndicator.getBoundingClientRect()
-
-                // Purely visual: Is the line actually between the top and bottom of the scroller?
-                // Add margins so it doesn't blink while still visible at edges
                 const isVisible = (indicatorRect.top >= scrollerRect.top + 20 && indicatorRect.bottom <= scrollerRect.bottom - 20)
-
                 setShowScrollToNow(!isVisible)
                 if (!isVisible) {
-                    // Correct directional mapping
-                    // If 'now' is physically above the viewport top -> Point UP
-                    // If 'now' is physically below the viewport bottom -> Point DOWN
                     setScrollAlignment(indicatorRect.top < scrollerRect.top ? 'up' : 'down')
-                }
-            } else {
-                // If not in DOM, it's definitely not visible. Use calculation.
-                const timeBody = scrollEl.querySelector('.fc-timegrid-body') as HTMLElement
-                if (timeBody) {
-                    const nowTotalMin = now.getHours() * 60 + now.getMinutes()
-                    const totalH = timeBody.offsetHeight
-                    const nowY = (nowTotalMin / 1440) * totalH
-
-                    setShowScrollToNow(true)
-                    setScrollAlignment(nowY < scrollEl.scrollTop ? 'up' : 'down')
                 }
             }
         }
 
         const updateHover = () => {
             const { x: clientX, y: clientY } = mousePosRef.current
-            if (isOpen && hoverRef.current) {
+            if ((isOpen || isMultiSelectMode) && hoverRef.current) {
                 hoverRef.current.style.opacity = '0'
                 return
             }
@@ -145,7 +143,10 @@ export default function DashboardPage() {
 
             const firstSlot = document.querySelector('.fc-timegrid-slot')
             const cols = document.querySelectorAll('.fc-timegrid-col')
-            if (cols.length === 0 || !hoverRef.current || !firstSlot) return
+            if (cols.length === 0 || !hoverRef.current || !firstSlot) {
+                if (hoverRef.current) hoverRef.current.style.opacity = '0'
+                return
+            }
 
             const sRect = firstSlot.getBoundingClientRect()
             const slotHeight = sRect.height
@@ -161,7 +162,6 @@ export default function DashboardPage() {
                 const centerX = (activeColRect as DOMRect).left + (activeColRect as DOMRect).width / 2
                 const slotIndex = Math.floor(relativeY / slotHeight)
                 const snappedY = sRect.top + (slotIndex * slotHeight)
-
                 const hour = Math.floor(slotIndex / 4)
                 const min = (slotIndex % 4) * 15
 
@@ -169,38 +169,24 @@ export default function DashboardPage() {
                     hoverRef.current.innerText = `${hour.toString().padStart(2, '0')}:${min.toString().padStart(2, '0')}`
                     hoverRef.current.style.transform = `translate3d(${centerX}px, ${snappedY}px, 0) translate(-50%, -100%)`
                     hoverRef.current.style.opacity = '1'
-                } else {
-                    hoverRef.current.style.opacity = '0'
-                }
-            } else {
-                hoverRef.current.style.opacity = '0'
-            }
+                } else { hoverRef.current.style.opacity = '0' }
+            } else { hoverRef.current.style.opacity = '0' }
         }
 
-        const handleMouseMove = (e: MouseEvent) => {
+        window.addEventListener('mousemove', (e) => {
             mousePosRef.current = { x: e.clientX, y: e.clientY }
             cancelAnimationFrame(rafId)
             rafId = requestAnimationFrame(updateHover)
-        }
-
-        const handleBodyScroll = () => {
-            cancelAnimationFrame(rafId)
-            rafId = requestAnimationFrame(updateHover)
-        }
-
-        window.addEventListener('mousemove', handleMouseMove)
-        window.addEventListener('scroll', handleBodyScroll, true)
+        })
+        window.addEventListener('scroll', updateHover, true)
         window.addEventListener('scroll', handleCalendarScroll, true)
 
         return () => {
             cancelAnimationFrame(rafId)
-            window.removeEventListener('mousemove', handleMouseMove)
-            window.removeEventListener('scroll', handleBodyScroll, true)
-            window.removeEventListener('scroll', handleCalendarScroll, true)
+            window.removeEventListener('mousemove', updateHover)
         }
-    }, [isSelecting, isOpen, loading])
+    }, [isOpen, loading, isMultiSelectMode])
 
-    // Center viewport on start
     useEffect(() => {
         if (loading) return;
         const timer = setTimeout(() => {
@@ -230,6 +216,15 @@ export default function DashboardPage() {
     }
 
     function renderEventContent(eventInfo: any) {
+        const isSelectionHighlight = eventInfo.event.id.toString().startsWith('selection-')
+        if (isSelectionHighlight) {
+            return (
+                <div className="h-full w-full bg-blue-500/30 border-2 border-dashed border-blue-500 rounded-xl flex items-center justify-center">
+                    <Check className="w-4 h-4 text-blue-600" />
+                </div>
+            )
+        }
+
         const now = new Date()
         const start = new Date(eventInfo.event.start)
         const end = new Date(eventInfo.event.end)
@@ -239,6 +234,8 @@ export default function DashboardPage() {
         const isMirror = eventInfo.isMirror
         const isSelection = isMirror && !eventInfo.event.id
 
+        // Month view unified styling
+        const isMonthView = eventInfo.view.type === 'dayGridMonth'
         const durationMs = end.getTime() - start.getTime()
         const isShort = durationMs <= 30 * 60 * 1000
 
@@ -263,13 +260,16 @@ export default function DashboardPage() {
                 ${isCompleted ? 'grayscale opacity-80' : 'shadow-sm'}
                 ${isSelection ? 'bg-blue-400/20' : ''}
                 ${isShort ? 'p-1.5' : 'p-3'}
+                ${isMonthView ? 'month-event-fixed' : ''}
+                ${!isLocked ? 'anim-shake' : ''}
+                ${isMultiSelectMode && !isSelectionHighlight ? 'grayscale-[0.8] opacity-40' : ''}
                 ${isCurrent && !isCompleted ? 'ring-2 ring-emerald-500 ring-offset-2 shadow-[0_0_20px_rgba(16,185,129,0.4)]' : ''}
             `}
                 style={{
                     backgroundColor: isCurrent && !isCompleted ? '#ECFDF5' : (isCompleted ? '#E2E8F0' : (isMirror ? 'rgba(37, 99, 235, 0.2)' : color.bg)),
                 }}>
 
-                {isCurrent && !isCompleted && (
+                {isCurrent && !isCompleted && !isMonthView && (
                     <div className="absolute top-0 right-0 p-1">
                         <span className="flex h-2 w-2 relative">
                             <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
@@ -278,7 +278,7 @@ export default function DashboardPage() {
                     </div>
                 )}
 
-                {completedBadgeId === eventInfo.event.id && (
+                {!isMonthView && completedBadgeId === eventInfo.event.id && (
                     <div className="absolute inset-0 z-[100] flex items-center justify-center pointer-events-none">
                         <div className="animate-in fade-in zoom-in-50 duration-500 ease-out flex items-center justify-center">
                             <Check className="w-12 h-12 text-emerald-500/90 stroke-[1.5px] drop-shadow-[0_0_20px_rgba(16,185,129,0.3)] anim-checking" />
@@ -286,34 +286,19 @@ export default function DashboardPage() {
                     </div>
                 )}
 
-                {isMirror && (
-                    <>
-                        <div className="absolute -top-7 left-1/2 -translate-x-1/2 z-[300]">
-                            <div className="bg-blue-600 text-white px-2.5 py-1 rounded-lg text-[9px] font-black shadow-lg whitespace-nowrap">
-                                {startTime}
-                            </div>
-                        </div>
-                        <div className="absolute -bottom-6 left-1/2 -translate-x-1/2 z-[300]">
-                            <div className="bg-slate-900 text-white px-2.5 py-1 rounded-lg text-[9px] font-black shadow-lg whitespace-nowrap">
-                                {endTime}
-                            </div>
-                        </div>
-                    </>
-                )}
-
                 <div className="flex flex-col gap-1 min-h-0 w-full">
                     <div className="flex items-start justify-between gap-2">
                         <div
                             className={`
                                 font-black leading-[1.2] tracking-tight break-words line-clamp-2
-                                ${isShort ? 'text-[11px]' : 'text-[13px]'}
+                                ${isMonthView ? 'text-[10px]' : (isShort ? 'text-[11px]' : 'text-[13px]')}
                             `}
                             style={{ color: isCompleted ? '#94A3B8' : color.text }}
                         >
                             {isSelection ? '' : eventInfo.event.title}
                         </div>
 
-                        {!isMirror && !isSelection && (
+                        {!isMonthView && !isMirror && !isSelection && (
                             <button
                                 onClick={(e) => { e.stopPropagation(); handleAction(eventInfo.event.id, 'COMPLETE') }}
                                 className={`
@@ -333,6 +318,22 @@ export default function DashboardPage() {
         )
     }
 
+    const resetSelection = () => {
+        setSelectedRanges([])
+        setIsMultiSelectMode(false)
+    }
+
+    const confirmSelection = () => {
+        if (selectedRanges.length > 0) {
+            openModal(selectedRanges)
+            resetSelection()
+        }
+    }
+
+    const toggleLock = () => {
+        setIsLocked(!isLocked)
+    }
+
     return (
         <div className="min-h-screen flex flex-col relative bg-slate-50 text-slate-900 selection:bg-blue-500/20">
             <div
@@ -343,8 +344,8 @@ export default function DashboardPage() {
 
             <div className="max-w-[1600px] mx-auto w-full flex flex-col flex-1 p-6 md:p-10 gap-8 z-10">
                 <header className="flex flex-col md:flex-row md:items-end justify-between gap-6">
-                    <div>
-                        <div className="flex items-center gap-2 mb-3">
+                    <div className="flex flex-col gap-2">
+                        <div className="flex items-center gap-2">
                             <span className="w-3 h-3 rounded-full bg-blue-500" />
                             <span className="text-[11px] font-black uppercase tracking-[0.3em] text-blue-500/80">Active Session</span>
                         </div>
@@ -355,13 +356,23 @@ export default function DashboardPage() {
 
                     <div className="flex items-center gap-4">
                         <button
-                            onClick={() => window.location.reload()}
-                            className="p-4 rounded-2xl bg-white hover:bg-slate-50 border border-slate-200 transition-all group shadow-sm"
+                            onClick={toggleLock}
+                            className={`flex items-center gap-2 px-6 py-4 rounded-2xl font-black transition-all shadow-sm border ${isLocked
+                                    ? 'bg-white text-slate-400 border-slate-200 hover:text-blue-600'
+                                    : 'bg-amber-100 text-amber-700 border-amber-200 animate-pulse ring-4 ring-amber-500/10'
+                                }`}
                         >
-                            <RefreshCw className="w-5 h-5 text-slate-400 group-hover:rotate-180 transition-transform duration-500" />
+                            {isLocked ? <Lock className="w-4 h-4" /> : <Unlock className="w-4 h-4" />}
+                            {isLocked ? 'Locked' : 'Unlocked'}
                         </button>
                         <button
-                            onClick={() => openModal(new Date(), new Date(Date.now() + 3600000))}
+                            onClick={() => window.location.reload()}
+                            className="p-4 rounded-2xl bg-white hover:bg-slate-50 border border-slate-200 transition-all group shadow-sm text-slate-400"
+                        >
+                            <RefreshCw className="w-5 h-5 group-hover:rotate-180 transition-transform duration-500" />
+                        </button>
+                        <button
+                            onClick={() => openModal([{ start: new Date(), end: new Date(Date.now() + 3600000) }])}
                             className="bg-slate-900 hover:bg-black text-white px-8 py-4 rounded-2xl font-black flex items-center gap-3 shadow-xl hover:shadow-2xl transition-all active:scale-95 group"
                         >
                             <Plus className="w-5 h-5 group-hover:rotate-90 transition-transform duration-300" />
@@ -375,6 +386,63 @@ export default function DashboardPage() {
                         {loading && (
                             <div className="absolute inset-0 z-50 bg-white/60 backdrop-blur-md flex items-center justify-center">
                                 <Loader2 className="w-12 h-12 text-blue-600 animate-spin" />
+                            </div>
+                        )}
+
+                        {/* Selection Hub UI - Prettier & Better Aligned */}
+                        {isMultiSelectMode && (
+                            <div className="absolute top-6 left-1/2 -translate-x-1/2 z-[45] animate-in slide-in-from-top-4 duration-500 w-[90%] max-w-xl">
+                                <div className="bg-slate-900/90 backdrop-blur-2xl border border-white/20 p-6 rounded-[40px] shadow-[0_32px_64px_-16px_rgba(0,0,0,0.5)] flex flex-col gap-5">
+                                    <div className="flex items-center justify-between">
+                                        <div className="flex items-center gap-4">
+                                            <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-blue-500 to-indigo-500 flex items-center justify-center shadow-lg shadow-blue-500/20">
+                                                <Sparkles className="w-6 h-6 text-white animate-pulse" />
+                                            </div>
+                                            <div>
+                                                <p className="text-lg font-black text-white tracking-tight leading-none mb-1">Do you want more?</p>
+                                                <p className="text-xs font-bold text-slate-400">Drag to bundle multiple time ranges!</p>
+                                            </div>
+                                        </div>
+                                        <button onClick={resetSelection} className="p-3 text-slate-500 hover:text-white hover:bg-white/10 rounded-2xl transition-all">
+                                            <X className="w-5 h-5" />
+                                        </button>
+                                    </div>
+
+                                    <div className="flex items-center gap-3 overflow-x-auto pb-2 custom-scrollbar no-scrollbar scroll-smooth">
+                                        {selectedRanges.map((range, i) => (
+                                            <div key={i} className="bg-white/5 hover:bg-white/10 text-white pl-4 pr-2 py-2 rounded-2xl text-[11px] font-black border border-white/10 shrink-0 flex items-center gap-3 transition-colors group/pill">
+                                                <span className="text-blue-400 font-black">#{i + 1}</span>
+                                                <span className="opacity-80">
+                                                    {range.start.toLocaleDateString('ko-KR', { month: 'numeric', day: 'numeric' })}
+                                                    {range.start.getTime() !== range.end.getTime() &&
+                                                        ` ~ ${range.end.toLocaleDateString('ko-KR', { month: 'numeric', day: 'numeric' })}`}
+                                                </span>
+                                                <button
+                                                    onClick={() => setSelectedRanges(selectedRanges.filter((_, idx) => idx !== i))}
+                                                    className="w-6 h-6 rounded-lg hover:bg-red-500/20 hover:text-red-400 flex items-center justify-center transition-all opacity-40 group-hover/pill:opacity-100"
+                                                >
+                                                    <X className="w-3 h-3" />
+                                                </button>
+                                            </div>
+                                        ))}
+                                    </div>
+
+                                    <div className="flex items-center gap-3 pt-1">
+                                        <button
+                                            onClick={confirmSelection}
+                                            className="flex-1 bg-blue-600 hover:bg-blue-500 text-white py-4 rounded-[24px] font-black text-base transition-all active:scale-[0.98] shadow-xl shadow-blue-500/20 flex items-center justify-center gap-3 group/btn"
+                                        >
+                                            <Layers className="w-5 h-5 group-hover/btn:translate-y-[-2px] transition-transform" />
+                                            Combine {selectedRanges.length} Universes
+                                        </button>
+                                        <button
+                                            onClick={resetSelection}
+                                            className="px-8 bg-white/10 hover:bg-white/20 text-white py-4 rounded-[24px] font-black text-base transition-all active:scale-[0.98]"
+                                        >
+                                            Clear
+                                        </button>
+                                    </div>
+                                </div>
                             </div>
                         )}
 
@@ -401,18 +469,19 @@ export default function DashboardPage() {
                                 headerToolbar={{
                                     left: 'prev,next today',
                                     center: 'title',
-                                    right: 'timeGridWeek,timeGridDay'
+                                    right: 'dayGridMonth,timeGridWeek,timeGridDay'
                                 }}
                                 height="100%"
                                 stickyHeaderDates={true}
-                                events={events}
-                                editable={true}
-                                eventResizableFromStart={true}
+                                events={allEvents}
+                                editable={!isLocked}
+                                eventResizableFromStart={!isLocked}
                                 selectable={true}
                                 selectMirror={true}
-                                dayMaxEvents={true}
+                                dayMaxEvents={3}
                                 nowIndicator={true}
-                                allDaySlot={false}
+                                allDaySlot={true}
+                                allDayMaintainDuration={true}
                                 slotMinTime="00:00:00"
                                 slotMaxTime="24:00:00"
                                 slotDuration="00:15:00"
@@ -426,25 +495,20 @@ export default function DashboardPage() {
                                     const ms15 = 15 * 60 * 1000
                                     let s = new Date(Math.round(new Date(info.start).getTime() / ms15) * ms15)
                                     let e = new Date(Math.round(new Date(info.end).getTime() / ms15) * ms15)
-                                    if (s.getTime() === e.getTime()) e = new Date(s.getTime() + ms15)
-                                    openModal(s, e)
+                                    if (s.getTime() === e.getTime()) {
+                                        if (info.view.type === 'dayGridMonth') {
+                                            e = new Date(s.getTime() + 86400000 - 1000)
+                                        } else {
+                                            e = new Date(s.getTime() + ms15)
+                                        }
+                                    }
+
+                                    const newRange = { start: s, end: e }
+                                    setSelectedRanges(prev => [...prev, newRange])
+                                    setIsMultiSelectMode(true)
                                     info.view.calendar.unselect()
                                 }}
                                 eventDrop={async (info) => {
-                                    try {
-                                        await fetch('/api/reschedule', {
-                                            method: 'POST',
-                                            headers: { 'Content-Type': 'application/json' },
-                                            body: JSON.stringify({
-                                                blockId: info.event.id,
-                                                action: 'MOVE',
-                                                newStart: info.event.start?.toISOString(),
-                                                newEnd: info.event.end?.toISOString()
-                                            })
-                                        })
-                                    } catch (err) { info.revert() }
-                                }}
-                                eventResize={async (info) => {
                                     try {
                                         await fetch('/api/reschedule', {
                                             method: 'POST',
@@ -495,16 +559,41 @@ export default function DashboardPage() {
                 .fc-v-event { background: transparent !important; border: none !important; box-shadow: none !important; border-radius: 12px !important; }
                 .fc-event-main { padding: 0 !important; border-radius: 12px !important; background: transparent !important; }
                 
+                /* Month view unified styling */
+                .month-event-fixed {
+                    height: 24px !important;
+                    max-height: 24px !important;
+                    padding-top: 2px !important;
+                    padding-bottom: 2px !important;
+                    margin-bottom: 2px !important;
+                }
+
+                @keyframes shake {
+                  0% { transform: rotate(0.4deg); }
+                  25% { transform: rotate(-0.4deg); }
+                  50% { transform: rotate(0.4deg); }
+                  75% { transform: rotate(-0.4deg); }
+                  100% { transform: rotate(0.4deg); }
+                }
+                .anim-shake {
+                  animation: shake 0.25s infinite ease-in-out;
+                  cursor: grab !important;
+                }
+
+                .fc-timegrid-allday {
+                    background: #f8fafc !important;
+                    border-bottom: 2px solid #f1f5f9 !important;
+                }
+                .fc-timegrid-allday-frame {
+                    min-height: 60px !important;
+                    max-height: 100px !important;
+                    overflow-y: auto !important;
+                }
+
                 .fc-highlight { 
                     background: rgba(37, 99, 235, 0.1) !important; 
                     border: none !important;
                     border-radius: 12px !important;
-                }
-
-                .fc-v-event .fc-event-resizer { height: 12px !important; bottom: -6px !important; }
-                .fc-v-event .fc-event-resizer::after {
-                    content: ""; position: absolute; left: 50%; bottom: 5px; width: 24px; height: 4px;
-                    background: rgba(0, 0, 0, 0.1); border-radius: 2px; transform: translateX(-50%);
                 }
 
                 .fc-now-indicator-line {
@@ -513,24 +602,16 @@ export default function DashboardPage() {
                     box-shadow: 0 0 15px rgba(16, 185, 129, 0.4);
                     z-index: 100 !important;
                 }
-                .fc-now-indicator-arrow {
-                    border-color: #10b981 !important;
-                    border-width: 6px 0 6px 8px !important;
-                    border-top-color: transparent !important;
-                    border-bottom-color: transparent !important;
-                }
-
                 .fc-viewport-mask {
                     mask-image: linear-gradient(to bottom, transparent, black 15%, black 85%, transparent);
                     -webkit-mask-image: linear-gradient(to bottom, transparent, black 15%, black 85%, transparent);
                 }
 
-                .fc-scroller {
-                    scrollbar-width: none !important;
-                    scroll-behavior: smooth !important;
-                    overscroll-behavior: contain;
-                }
+                .fc-scroller { scrollbar-width: none !important; scroll-behavior: smooth !important; overscroll-behavior: contain; }
                 .fc-scroller::-webkit-scrollbar { display: none !important; }
+
+                .no-scrollbar::-webkit-scrollbar { display: none !important; }
+                .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
 
                 @keyframes check-pop {
                     0% { transform: scale(0.5); opacity: 0; }

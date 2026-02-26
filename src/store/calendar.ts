@@ -1,17 +1,22 @@
+'use client'
+
 import { create } from 'zustand'
+
+export interface TaskRange {
+    start: Date
+    end: Date
+}
 
 interface TaskModalState {
     isOpen: boolean
-    start: Date | null
-    end: Date | null
-    openModal: (start: Date, end: Date) => void
+    ranges: TaskRange[]
+    openModal: (ranges: TaskRange[]) => void
     closeModal: () => void
 }
 
 export const useTaskModalStore = create<TaskModalState>((set) => ({
     isOpen: false,
-    start: null,
-    end: null,
-    openModal: (start, end) => set({ isOpen: true, start, end }),
-    closeModal: () => set({ isOpen: false, start: null, end: null }),
+    ranges: [],
+    openModal: (ranges) => set({ isOpen: true, ranges }),
+    closeModal: () => set({ isOpen: false, ranges: [] }),
 }))
