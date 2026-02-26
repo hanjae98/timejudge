@@ -17,6 +17,7 @@ export default function DashboardPage() {
     const [isSelecting, setIsSelecting] = useState(false)
     const mousePosRef = useRef({ x: 0, y: 0 })
     const hoverRef = useRef<HTMLDivElement>(null)
+    const [completedBadgeId, setCompletedBadgeId] = useState<string | null>(null)
 
     useEffect(() => {
         fetchEvents()
@@ -150,6 +151,10 @@ export default function DashboardPage() {
     }
 
     async function handleAction(blockId: string, action: 'COMPLETE' | 'RESCHEDULE') {
+        if (action === 'COMPLETE') {
+            setCompletedBadgeId(blockId)
+            setTimeout(() => setCompletedBadgeId(null), 1500)
+        }
         const res = await fetch('/api/reschedule', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -207,6 +212,13 @@ export default function DashboardPage() {
                 style={{
                     backgroundColor: isCompleted ? '#E2E8F0' : isMirror ? 'rgba(37, 99, 235, 0.2)' : color.bg,
                 }}>
+
+                {/* Done Badge Overlay */}
+                {completedBadgeId === eventInfo.event.id && (
+                    <div className="absolute inset-0 z-[100] bg-emerald-500 border-none rounded-xl flex items-center justify-center animate-in zoom-in-95 fade-in duration-300">
+                        <span className="text-white font-black text-sm tracking-tight drop-shadow-sm">Done!</span>
+                    </div>
+                )}
 
                 {isMirror && (
                     <>
