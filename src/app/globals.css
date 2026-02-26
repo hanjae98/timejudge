@@ -8,21 +8,13 @@
 }
 
 :root {
-  --background: #ffffff;
+  --background: #f8fafc;
+  /* Clean Light Slate */
   --foreground: #0f172a;
   --glass-bg: rgba(255, 255, 255, 0.7);
-  --glass-border: rgba(255, 255, 255, 0.3);
-  --accent-primary: #3b82f6;
-  --accent-secondary: #8b5cf6;
-}
-
-.dark {
-  --background: #020617;
-  --foreground: #f8fafc;
-  --glass-bg: rgba(15, 23, 42, 0.6);
-  --glass-border: rgba(255, 255, 255, 0.1);
-  --accent-primary: #60a5fa;
-  --accent-secondary: #a78bfa;
+  --glass-border: rgba(0, 0, 0, 0.05);
+  --accent-primary: #2563eb;
+  --accent-secondary: #7c3aed;
 }
 
 body {
@@ -30,51 +22,30 @@ body {
   color: var(--foreground);
   font-family: var(--font-sans);
   overflow-x: hidden;
+  background-image:
+    radial-gradient(at 0% 0%, rgba(37, 99, 235, 0.03) 0px, transparent 50%),
+    radial-gradient(at 100% 100%, rgba(124, 58, 237, 0.03) 0px, transparent 50%);
 }
 
-/* Premium Glassmorphism */
+/* Premium Light Glassmorphism */
 .glass {
-  background: var(--glass-bg);
-  backdrop-filter: blur(24px) saturate(180%);
-  -webkit-backdrop-filter: blur(24px) saturate(180%);
-  border: 1px solid var(--glass-border);
+  background: rgba(255, 255, 255, 0.8);
+  backdrop-filter: blur(20px) saturate(160%);
+  -webkit-backdrop-filter: blur(20px) saturate(160%);
+  border: 1px solid rgba(255, 255, 255, 0.5);
+  box-shadow: 0 4px 30px rgba(0, 0, 0, 0.03);
 }
 
 .glass-card {
-  background: var(--glass-bg);
-  backdrop-filter: blur(12px) saturate(160%);
-  -webkit-backdrop-filter: blur(12px) saturate(160%);
-  border: 1px solid var(--glass-border);
-  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.08);
-}
-
-/* Mesh Background */
-.mesh-bg {
-  position: fixed;
-  top: 0;
-  left: 0;
-  width: 100vw;
-  height: 100vh;
-  z-index: -1;
-  background-color: var(--background);
-  background-image:
-    radial-gradient(at 0% 0%, hsla(225, 100%, 60%, 0.15) 0px, transparent 50%),
-    radial-gradient(at 100% 0%, hsla(270, 100%, 65%, 0.15) 0px, transparent 50%),
-    radial-gradient(at 100% 100%, hsla(200, 100%, 55%, 0.1) 0px, transparent 50%),
-    radial-gradient(at 0% 100%, hsla(250, 100%, 60%, 0.1) 0px, transparent 50%);
-}
-
-.dark .mesh-bg {
-  background-image:
-    radial-gradient(at 0% 0%, rgba(59, 130, 246, 0.1) 0px, transparent 50%),
-    radial-gradient(at 100% 0%, rgba(139, 92, 246, 0.1) 0px, transparent 50%),
-    radial-gradient(at 50% 50%, rgba(15, 23, 42, 0.5) 0px, transparent 50%);
+  background: #ffffff;
+  border: 1px solid rgba(0, 0, 0, 0.05);
+  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.02), 0 4px 6px -4px rgba(0, 0, 0, 0.02);
 }
 
 /* Custom Scrollbar */
 ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 5px;
+  height: 5px;
 }
 
 ::-webkit-scrollbar-track {
@@ -82,61 +53,19 @@ body {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: rgba(148, 163, 184, 0.2);
+  background: rgba(0, 0, 0, 0.05);
   border-radius: 10px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(148, 163, 184, 0.4);
+  background: rgba(0, 0, 0, 0.15);
 }
 
-/* Animations */
-@keyframes float {
-  0% {
-    transform: translateY(0px);
-  }
-
-  50% {
-    transform: translateY(-10px);
-  }
-
-  100% {
-    transform: translateY(0px);
-  }
-}
-
-.animate-float {
-  animation: float 6s ease-in-out infinite;
-}
-
-@keyframes glow {
-
-  0%,
-  100% {
-    opacity: 0.5;
-    filter: blur(20px);
-  }
-
-  50% {
-    opacity: 1;
-    filter: blur(30px);
-  }
-}
-
-.bg-glow {
-  position: absolute;
-  width: 300px;
-  height: 300px;
-  border-radius: 50%;
-  background: radial-gradient(circle, var(--accent-primary) 0%, transparent 70%);
-  z-index: -1;
-  animation: glow 8s ease-in-out infinite;
-}
-
-/* FullCalendar Overrides */
+/* FullCalendar Overrides - Light & Crisp */
 .fc {
-  --fc-border-color: rgba(255, 255, 255, 0.05);
-  --fc-today-bg-color: rgba(59, 130, 246, 0.03);
+  --fc-border-color: rgba(0, 0, 0, 0.04);
+  --fc-today-bg-color: rgba(37, 99, 235, 0.02);
+  --fc-now-indicator-color: #2563eb;
   font-family: var(--font-sans) !important;
 }
 
@@ -146,22 +75,31 @@ body {
 
 .fc-theme-standard td,
 .fc-theme-standard th {
-  border: 1px solid rgba(255, 255, 255, 0.03) !important;
+  border: 1px solid rgba(0, 0, 0, 0.03) !important;
 }
 
-/* Hourly Lines vs 15min Lines */
+/* Slot Lines */
 .fc-timegrid-slot-lane {
-  border-bottom: 2px solid rgba(255, 255, 255, 0.08) !important;
-  /* Hourly line */
+  border-bottom: 1px solid rgba(0, 0, 0, 0.05) !important;
 }
 
 .fc-timegrid-slot-minor {
-  border-bottom: 1px solid rgba(255, 255, 255, 0.02) !important;
-  /* 15min line */
+  border-bottom: 1px solid rgba(0, 0, 0, 0.02) !important;
 }
 
-/* Ensure slots have enough height */
+/* Compact Slots */
 .fc-timegrid-slot {
-  height: 24px !important;
-  /* 15 mins = 24px, 1 hour = 96px */
+  height: 20px !important;
+  /* Slightly more breathable than 18px but still compact */
+}
+
+/* Premium Indicators */
+.fc-timegrid-now-indicator-line {
+  border-width: 2px 0 0 !important;
+}
+
+.fc-timegrid-now-indicator-arrow {
+  border-width: 5px 0 5px 6px !important;
+  border-top-color: transparent !important;
+  border-bottom-color: transparent !important;
 }

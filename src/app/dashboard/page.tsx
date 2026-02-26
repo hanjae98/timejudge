@@ -4,88 +4,86 @@ import interactionPlugin from '@fullcalendar/interaction'
 import timeGridPlugin from '@fullcalendar/timegrid'
 import dayGridPlugin from '@fullcalendar/daygrid'
 import FullCalendar from '@fullcalendar/react'
-import { Calendar, CheckCircle2, Loader2, ArrowRight, Plus, Clock } from 'lucide-react'
+import { Calendar, Loader2, RefreshCw, Plus, Check } from 'lucide-react'
 import { useTaskModalStore } from '@/store/calendar'
 import { useState, useEffect, useRef } from 'react'
 import TaskModal from '@/components/calendar/TaskModal'
 import TaskInbox from '@/components/calendar/TaskInbox'
-import { createClient } from '@/lib/supabase/client'
 
 export default function DashboardPage() {
     const { isOpen, openModal } = useTaskModalStore()
     const [events, setEvents] = useState<any[]>([])
     const [loading, setLoading] = useState(true)
-    const hoverRef = useRef<HTMLDivElement>(null)
     const [isSelecting, setIsSelecting] = useState(false)
+    const hoverRef = useRef<HTMLDivElement>(null)
 
     useEffect(() => {
         fetchEvents()
     }, [])
 
     useEffect(() => {
-        const body = document.querySelector('.fc-timegrid-body')
-        if (!body) return
+        const attachListeners = () => {
+            const body = document.querySelector('.fc-timegrid-body')
+            if (!body) return
 
-        const handleMouseMove = (e: MouseEvent) => {
-            // Hide hover preview if currently selecting, dragging, or modal is open
-            if ((isSelecting || isOpen) && hoverRef.current) {
-                hoverRef.current.style.opacity = '0'
-                return
-            }
-
-            const rect = body.getBoundingClientRect()
-            const y = e.clientY - rect.top
-
-            const cols = document.querySelectorAll('.fc-timegrid-col')
-            let activeCol: HTMLElement | null = null
-            cols.forEach(col => {
-                const cRect = col.getBoundingClientRect()
-                if (e.clientX >= cRect.left && e.clientX <= cRect.right) {
-                    activeCol = col as HTMLElement
+            const handleMouseMove = (e: MouseEvent) => {
+                if ((isSelecting || isOpen) && hoverRef.current) {
+                    hoverRef.current.style.opacity = '0'
+                    return
                 }
-            })
 
-            if (activeCol && (activeCol as any).getBoundingClientRect && hoverRef.current) {
-                const colRect = (activeCol as any).getBoundingClientRect()
-                const centerX = colRect.left + colRect.width / 2
+                const slots = document.querySelector('.fc-timegrid-slots')
+                const cols = document.querySelectorAll('.fc-timegrid-col')
+                if (!slots || cols.length === 0 || !hoverRef.current) return
 
-                // 15 mins = 24px
-                const slotIndex = Math.floor(y / 24)
-                const snappedY = rect.top + (slotIndex * 24)
+                const sRect = slots.getBoundingClientRect()
+                const relativeY = e.clientY - sRect.top
 
-                const hour = 7 + Math.floor(slotIndex / 4)
-                const min = (slotIndex % 4) * 15
+                let activeColRect: DOMRect | null = null
+                cols.forEach(col => {
+                    const r = col.getBoundingClientRect()
+                    if (e.clientX >= r.left && e.clientX <= r.right) activeColRect = r
+                })
 
-                if (hour >= 7 && hour < 25) {
-                    hoverRef.current.innerText = `${hour.toString().padStart(2, '0')}:${min.toString().padStart(2, '0')}`
-                    hoverRef.current.style.left = `${centerX}px`
-                    hoverRef.current.style.top = `${snappedY - 6}px`
-                    hoverRef.current.style.opacity = '1'
+                if (activeColRect) {
+                    const centerX = (activeColRect as DOMRect).left + (activeColRect as DOMRect).width / 2
+                    const slotHeight = 20
+                    const slotIndex = Math.floor(relativeY / slotHeight)
+                    const snappedY = sRect.top + (slotIndex * slotHeight)
+
+                    const hour = 7 + Math.floor(slotIndex / 4)
+                    const min = (slotIndex % 4) * 15
+
+                    if (hour >= 7 && hour < 25) {
+                        hoverRef.current.innerText = `${hour.toString().padStart(2, '0')}:${min.toString().padStart(2, '0')}`
+                        hoverRef.current.style.left = `${centerX}px`
+                        hoverRef.current.style.top = `${snappedY - 4}px`
+                        hoverRef.current.style.opacity = '1'
+                    } else {
+                        hoverRef.current.style.opacity = '0'
+                    }
                 } else {
                     hoverRef.current.style.opacity = '0'
                 }
-            } else if (hoverRef.current) {
-                hoverRef.current.style.opacity = '0'
+            }
+
+            const handleMouseDown = () => setIsSelecting(true)
+            const handleMouseUp = () => setIsSelecting(false)
+
+            window.addEventListener('mousemove', handleMouseMove)
+            body.addEventListener('mousedown', handleMouseDown)
+            window.addEventListener('mouseup', handleMouseUp)
+
+            return () => {
+                window.removeEventListener('mousemove', handleMouseMove)
+                body.removeEventListener('mousedown', handleMouseDown)
+                window.removeEventListener('mouseup', handleMouseUp)
             }
         }
 
-        const handleMouseDown = () => setIsSelecting(true)
-        const handleMouseUp = () => setIsSelecting(false)
-        const handleMouseLeave = () => { if (hoverRef.current) hoverRef.current.style.opacity = '0' }
-
-        const target = body as HTMLElement
-        window.addEventListener('mousemove', handleMouseMove)
-        target.addEventListener('mousedown', handleMouseDown)
-        window.addEventListener('mouseup', handleMouseUp)
-        target.addEventListener('mouseleave', handleMouseLeave)
-
-        return () => {
-            window.removeEventListener('mousemove', handleMouseMove)
-            target.removeEventListener('mousedown', handleMouseDown)
-            window.removeEventListener('mouseup', handleMouseUp)
-            target.removeEventListener('mouseleave', handleMouseLeave)
-        }
-    }, [isSelecting, isOpen])
+        const cleanup = attachListeners()
+        return () => cleanup && cleanup()
+    }, [isSelecting, isOpen, loading])
 
     const fetchEvents = async () => {
         try {
@@ -95,12 +93,11 @@ export default function DashboardPage() {
                 const formatted = data.map(block => {
                     const title = block.task?.title || '할 일'
                     const colors = [
-                        { bg: '#EFF6FF', text: '#1E40AF', border: '#3B82F6' },
-                        { bg: '#F5F3FF', text: '#5B21B6', border: '#8B5CF6' },
-                        { bg: '#ECFDF5', text: '#065F46', border: '#10B981' },
-                        { bg: '#FFF7ED', text: '#9A3412', border: '#F97316' },
-                        { bg: '#FFF1F2', text: '#9F1239', border: '#FB7185' },
-                        { bg: '#FDF2F8', text: '#9D174D', border: '#F472B6' },
+                        { bg: '#DBEAFE', text: '#1E40AF', border: '#3B82F6' },
+                        { bg: '#F3E8FF', text: '#6B21A8', border: '#A855F7' },
+                        { bg: '#D1FAE5', text: '#065F46', border: '#10B981' },
+                        { bg: '#FEF3C7', text: '#92400E', border: '#F59E0B' },
+                        { bg: '#FEE2E2', text: '#991B1B', border: '#EF4444' },
                     ]
                     const hash = title.split('').reduce((acc: number, char: string) => acc + char.charCodeAt(0), 0)
                     const colorScheme = colors[hash % colors.length]
@@ -110,13 +107,7 @@ export default function DashboardPage() {
                         title,
                         start: block.start_time,
                         end: block.end_time,
-                        backgroundColor: block.is_completed ? '#F8FAFC' : colorScheme.bg,
-                        textColor: block.is_completed ? '#94A3B8' : colorScheme.text,
-                        borderColor: block.is_completed ? '#E2E8F0' : colorScheme.border,
-                        extendedProps: {
-                            ...block,
-                            colorScheme
-                        }
+                        extendedProps: { ...block, colorScheme }
                     }
                 })
                 setEvents(formatted)
@@ -138,22 +129,28 @@ export default function DashboardPage() {
     }
 
     function renderDayHeader(headerInfo: any) {
+        const isToday = headerInfo.isToday
         return (
-            <div className="flex flex-col items-center py-2 group/header w-full relative">
-                <div className="flex items-center gap-2">
-                    <div className="text-[13px] font-black tracking-tighter transition-colors group-hover/header:text-blue-400">
-                        {headerInfo.text}
-                    </div>
+            <div className="flex flex-col items-center py-4 group/header w-full relative">
+                <div className={`text-[10px] font-black tracking-[0.2em] uppercase mb-1 ${isToday ? 'text-blue-600' : 'text-slate-400'}`}>
+                    {headerInfo.date.toLocaleDateString('en-US', { weekday: 'short' })}
                 </div>
+                <div className={`text-2xl font-black tracking-tighter transition-all ${isToday ? 'text-blue-600 scale-110' : 'text-slate-900'}`}>
+                    {headerInfo.date.getDate()}
+                </div>
+                {isToday && <div className="absolute bottom-1 w-1 h-1 rounded-full bg-blue-600 shadow-[0_0_10px_rgba(37,99,235,0.5)]" />}
             </div>
         )
     }
 
     function renderEventContent(eventInfo: any) {
         const isCompleted = eventInfo.event.extendedProps.is_completed
-        const color = eventInfo.event.extendedProps.colorScheme || { bg: '#1e293b', text: '#cbd5e1', border: '#334155' }
+        const color = eventInfo.event.extendedProps.colorScheme || { bg: '#DBEAFE', text: '#1E40AF', border: '#3B82F6' }
         const isMirror = eventInfo.isMirror
         const isSelection = isMirror && !eventInfo.event.id
+
+        const durationMs = (eventInfo.event.end?.getTime() || 0) - (eventInfo.event.start?.getTime() || 0)
+        const isShort = durationMs <= 30 * 60 * 1000
 
         let displayStart = eventInfo.event.start
         let displayEnd = eventInfo.event.end
@@ -162,281 +159,240 @@ export default function DashboardPage() {
             const ms15 = 15 * 60 * 1000
             let s = new Date(Math.round(displayStart.getTime() / ms15) * ms15)
             let e = new Date(Math.round(displayEnd.getTime() / ms15) * ms15)
-            if (s.getTime() === e.getTime()) {
-                e = new Date(s.getTime() + ms15)
-            }
-            displayStart = s
-            displayEnd = e
+            if (s.getTime() === e.getTime()) e = new Date(s.getTime() + ms15)
+            displayStart = s; displayEnd = e
         }
-
-        const durationMs = (eventInfo.event.end?.getTime() || 0) - (eventInfo.event.start?.getTime() || 0)
-        const isShort = durationMs <= 30 * 60 * 1000 // 30 mins or less
 
         const startTime = displayStart?.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })
         const endTime = displayEnd?.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })
 
         return (
             <div className={`
-                group/event relative h-full w-full rounded-2xl transition-all duration-500
-                flex flex-col justify-start overflow-visible border
-                ${isMirror ? 'z-[200] ring-4 ring-blue-500 shadow-[0_0_60px_rgba(59,130,246,0.5)]' : 'hover:scale-[1.01] hover:border-blue-500/50'}
-                ${isCompleted ? 'grayscale opacity-40' : 'shadow-lg'}
-                ${isSelection ? 'bg-blue-600/20 border-blue-500 border-dashed animate-pulse' : ''}
-                ${isShort ? 'p-2' : 'p-3'}
+                group/event relative h-full w-full rounded-xl transition-all duration-300
+                flex flex-col justify-start overflow-visible border-none
+                ${isCompleted ? 'grayscale opacity-80' : 'shadow-sm'}
+                ${isSelection ? 'bg-blue-400/20' : ''}
+                ${isShort ? 'p-1.5' : 'p-3'}
             `}
                 style={{
-                    backgroundColor: isCompleted ? 'rgba(30, 41, 59, 0.4)' : isMirror ? 'rgba(59, 130, 246, 0.2)' : `${color.bg}33`,
-                    borderColor: isCompleted ? 'rgba(71, 85, 105, 0.2)' : isMirror ? '#3b82f6' : `${color.border}66`,
-                    backdropFilter: 'blur(12px)'
+                    backgroundColor: isCompleted ? '#E2E8F0' : isMirror ? 'rgba(37, 99, 235, 0.2)' : color.bg,
                 }}>
 
                 {isMirror && (
                     <>
-                        <div className="time-floating-bubble absolute -top-7 left-1/2 -translate-x-1/2 flex flex-col items-center z-[300]">
-                            <div className="rounded-full bg-blue-600 text-white px-4 py-1.5 text-[11px] font-black shadow-2xl flex items-center gap-2 whitespace-nowrap">
-                                <Plus className="w-3 h-3" />
+                        <div className="absolute -top-7 left-1/2 -translate-x-1/2 z-[300]">
+                            <div className="bg-blue-600 text-white px-2.5 py-1 rounded-lg text-[9px] font-black shadow-lg whitespace-nowrap">
                                 {startTime}
                             </div>
                         </div>
-
-                        <div className="time-floating-bubble absolute -bottom-5 left-1/2 -translate-x-1/2 bg-slate-900 border border-white/10 text-white px-4 py-1.5 rounded-full text-[11px] font-black shadow-2xl flex items-center gap-2 whitespace-nowrap z-[300]">
-                            <ArrowRight className="w-3 h-3 text-blue-400" />
-                            {endTime}
+                        <div className="absolute -bottom-6 left-1/2 -translate-x-1/2 z-[300]">
+                            <div className="bg-slate-900 text-white px-2.5 py-1 rounded-lg text-[9px] font-black shadow-lg whitespace-nowrap">
+                                {endTime}
+                            </div>
                         </div>
                     </>
                 )}
 
-                <div className="flex flex-col gap-1.5 min-h-0 w-full">
-                    <div className="flex items-start justify-between">
-                        <div className={`
-                            font-bold leading-tight tracking-tight break-words line-clamp-2
-                            ${isShort ? 'text-[11px]' : 'text-sm'}
-                            ${isCompleted ? 'line-through text-slate-500' : 'text-white'}
-                        `}>
+                <div className="flex flex-col gap-1 min-h-0 w-full">
+                    <div className="flex items-start justify-between gap-2">
+                        <div
+                            className={`
+                                font-black leading-[1.2] tracking-tight break-words line-clamp-2
+                                ${isShort ? 'text-[11px]' : 'text-[13px]'}
+                            `}
+                            style={{ color: isCompleted ? '#94A3B8' : color.text }}
+                        >
                             {isSelection ? '' : eventInfo.event.title}
                         </div>
-                        {isCompleted && <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0 mt-0.5" />}
+
+                        {!isMirror && !isSelection && (
+                            <button
+                                onClick={(e) => { e.stopPropagation(); handleAction(eventInfo.event.id, 'COMPLETE') }}
+                                className={`
+                                    absolute top-1 right-1 transition-all duration-300 flex items-center justify-center
+                                    ${isCompleted
+                                        ? 'text-emerald-500 scale-110 opacity-100'
+                                        : 'text-slate-400 opacity-20 group-hover/event:opacity-100 group-hover/event:text-emerald-500 hover:scale-125'
+                                    }
+                                `}
+                            >
+                                <Check className={isShort ? 'w-3 h-3' : 'w-4 h-4'} />
+                            </button>
+                        )}
                     </div>
                 </div>
-
-                {!isCompleted && !isMirror && !isShort && (
-                    <div className="mt-auto flex items-center gap-2 opacity-0 group-hover/event:opacity-100 transition-all duration-300 translate-y-2 group-hover/event:translate-y-0">
-                        <button
-                            onClick={(e) => { e.stopPropagation(); handleAction(eventInfo.event.id, 'COMPLETE') }}
-                            className="flex-1 bg-white/10 hover:bg-emerald-500 text-white py-1 rounded-xl transition-all flex items-center justify-center"
-                        >
-                            <CheckCircle2 className="w-3.5 h-3.5" />
-                        </button>
-                    </div>
-                )}
-
-                {!isCompleted && !isSelection && (
-                    <div className="absolute inset-0 rounded-2xl bg-gradient-to-br from-white/10 to-transparent opacity-0 group-hover/event:opacity-100 transition-opacity pointer-events-none" />
-                )}
             </div>
         )
     }
 
     return (
-        <div className="min-h-screen flex flex-col relative p-4 md:p-10 text-slate-200">
-            {/* Ultra-High Performance Hover Bubble (Centering) */}
+        <div className="min-h-screen flex flex-col relative bg-slate-50 text-slate-900 selection:bg-blue-500/20">
+            {/* Ultra-Smooth Hover Preview */}
             <div
                 ref={hoverRef}
-                className="fixed pointer-events-none z-[9999] bg-slate-900 border border-blue-500/30 px-2 py-1 rounded-lg text-[10px] font-black text-blue-400 shadow-[0_0_20px_rgba(59,130,246,0.2)] -translate-x-1/2 -translate-y-full opacity-0 pointer-events-none transition-all duration-75 ease-out"
+                className="fixed pointer-events-none z-[9999] bg-white border border-blue-200 px-2.5 py-1.5 rounded-xl text-[10px] font-black text-blue-600 shadow-2xl opacity-0 will-change-transform"
                 style={{ left: 0, top: 0 }}
             />
 
-            <div className="mb-10 flex flex-col md:flex-row md:items-end justify-between gap-6">
-                <div>
-                    <h1 className="text-5xl md:text-6xl font-black text-white mb-3 tracking-tighter bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-purple-500">
-                        My Universe
-                    </h1>
-                    <p className="text-slate-400 font-medium text-lg">AI가 설계한 당신의 몰입을 위한 시간선</p>
-                </div>
-                <div className="flex gap-3">
-                    <button
-                        onClick={() => window.location.reload()}
-                        className="glass-card text-slate-300 px-6 py-3 rounded-2xl font-bold hover:bg-white/10 transition-all flex items-center gap-2 border-white/5"
-                    >
-                        새로고침
-                    </button>
-                    <button
-                        onClick={() => openModal(new Date(), new Date(Date.now() + 3600000))}
-                        className="bg-blue-600 hover:bg-blue-500 text-white px-8 py-3 rounded-2xl font-black flex items-center gap-2 shadow-[0_0_30px_rgba(59,130,246,0.5)] transition-all active:scale-95 group"
-                    >
-                        <Plus className="w-5 h-5 group-hover:rotate-90 transition-transform duration-300" />
-                        일정 추가
-                    </button>
-                </div>
-            </div>
+            <div className="max-w-[1600px] mx-auto w-full flex flex-col flex-1 p-6 md:p-10 gap-8 z-10">
+                <header className="flex flex-col md:flex-row md:items-end justify-between gap-6">
+                    <div>
+                        <div className="flex items-center gap-2 mb-3">
+                            <span className="w-3 h-3 rounded-full bg-blue-500" />
+                            <span className="text-[11px] font-black uppercase tracking-[0.3em] text-blue-500/80">Active Session</span>
+                        </div>
+                        <h1 className="text-5xl md:text-6xl font-black text-slate-900 tracking-tighter">
+                            My Universe
+                        </h1>
+                    </div>
 
-            <div className="flex-1 glass rounded-[40px] shadow-2xl border-white/10 flex overflow-hidden relative">
-                {loading && (
-                    <div className="absolute inset-0 z-50 bg-slate-950/40 backdrop-blur-xl flex items-center justify-center">
-                        <div className="flex flex-col items-center gap-4">
-                            <Loader2 className="w-16 h-16 text-blue-500 animate-spin" />
-                            <p className="text-blue-400 font-black animate-pulse uppercase tracking-widest text-sm">Synchronizing...</p>
+                    <div className="flex items-center gap-4">
+                        <button
+                            onClick={() => window.location.reload()}
+                            className="p-4 rounded-2xl bg-white hover:bg-slate-50 border border-slate-200 transition-all group shadow-sm"
+                        >
+                            <RefreshCw className="w-5 h-5 text-slate-400 group-hover:rotate-180 transition-transform duration-500" />
+                        </button>
+                        <button
+                            onClick={() => openModal(new Date(), new Date(Date.now() + 3600000))}
+                            className="bg-slate-900 hover:bg-black text-white px-8 py-4 rounded-2xl font-black flex items-center gap-3 shadow-xl hover:shadow-2xl transition-all active:scale-95 group"
+                        >
+                            <Plus className="w-5 h-5 group-hover:rotate-90 transition-transform duration-300" />
+                            <span className="text-lg">Add Event</span>
+                        </button>
+                    </div>
+                </header>
+
+                <main className="flex-1 flex flex-col lg:flex-row gap-8 min-h-0">
+                    <div className="flex-1 glass rounded-[40px] overflow-hidden flex flex-col relative border-white shadow-2xl">
+                        {loading && (
+                            <div className="absolute inset-0 z-50 bg-white/60 backdrop-blur-md flex items-center justify-center">
+                                <Loader2 className="w-12 h-12 text-blue-600 animate-spin" />
+                            </div>
+                        )}
+                        <div className="flex-1 p-4 md:p-6 overflow-auto custom-scrollbar">
+                            <FullCalendar
+                                plugins={[dayGridPlugin, timeGridPlugin, interactionPlugin]}
+                                initialView="timeGridWeek"
+                                firstDay={1}
+                                headerToolbar={{
+                                    left: 'prev,next today',
+                                    center: 'title',
+                                    right: 'timeGridWeek,timeGridDay'
+                                }}
+                                height="auto"
+                                stickyHeaderDates={true}
+                                events={events}
+                                editable={true}
+                                eventResizableFromStart={true}
+                                selectable={true}
+                                selectMirror={true}
+                                dayMaxEvents={true}
+                                nowIndicator={true}
+                                allDaySlot={false}
+                                slotMinTime="07:00:00"
+                                slotMaxTime="25:00:00"
+                                slotDuration="00:15:00"
+                                slotLabelInterval="01:00:00"
+                                snapDuration="00:01:00"
+                                selectMinDistance={1}
+                                eventMinHeight={20}
+                                eventOverlap={false}
+                                slotLabelFormat={{ hour: 'numeric', meridiem: false, hour12: false }}
+                                select={(info) => {
+                                    const ms15 = 15 * 60 * 1000
+                                    let s = new Date(Math.round(new Date(info.start).getTime() / ms15) * ms15)
+                                    let e = new Date(Math.round(new Date(info.end).getTime() / ms15) * ms15)
+                                    if (s.getTime() === e.getTime()) e = new Date(s.getTime() + ms15)
+                                    openModal(s, e)
+                                    info.view.calendar.unselect()
+                                }}
+                                eventDrop={async (info) => {
+                                    try {
+                                        await fetch('/api/reschedule', {
+                                            method: 'POST',
+                                            headers: { 'Content-Type': 'application/json' },
+                                            body: JSON.stringify({
+                                                blockId: info.event.id,
+                                                action: 'MOVE',
+                                                newStart: info.event.start?.toISOString(),
+                                                newEnd: info.event.end?.toISOString()
+                                            })
+                                        })
+                                    } catch (err) { info.revert() }
+                                }}
+                                eventResize={async (info) => {
+                                    try {
+                                        await fetch('/api/reschedule', {
+                                            method: 'POST',
+                                            headers: { 'Content-Type': 'application/json' },
+                                            body: JSON.stringify({
+                                                blockId: info.event.id,
+                                                action: 'MOVE',
+                                                newStart: info.event.start?.toISOString(),
+                                                newEnd: info.event.end?.toISOString()
+                                            })
+                                        })
+                                    } catch (err) { info.revert() }
+                                }}
+                                eventContent={renderEventContent}
+                                dayHeaderContent={renderDayHeader}
+                            />
                         </div>
                     </div>
-                )}
 
-                <div className="flex-1 flex flex-col min-w-0">
-                    <div className="flex-1 p-4 md:p-8 overflow-auto custom-scrollbar">
-                        <FullCalendar
-                            plugins={[dayGridPlugin, timeGridPlugin, interactionPlugin]}
-                            initialView="timeGridWeek"
-                            firstDay={1}
-                            headerToolbar={{
-                                left: 'prev,next today',
-                                center: 'title',
-                                right: 'timeGridWeek,timeGridDay'
-                            }}
-                            height="auto"
-                            stickyHeaderDates={true}
-                            events={events}
-                            editable={true}
-                            eventResizableFromStart={true}
-                            selectable={true}
-                            selectMirror={true}
-                            dayMaxEvents={true}
-                            nowIndicator={true}
-                            allDaySlot={false}
-                            slotMinTime="07:00:00"
-                            slotMaxTime="25:00:00"
-                            slotDuration="00:15:00"
-                            slotLabelInterval="01:00:00"
-                            snapDuration="00:01:00"
-                            selectMinDistance={1}
-                            eventMinHeight={20}
-                            eventOverlap={false}
-                            slotLabelFormat={{
-                                hour: 'numeric',
-                                meridiem: false,
-                                hour12: false
-                            }}
-                            select={(info) => {
-                                const start = new Date(info.start)
-                                const end = new Date(info.end)
-                                const ms15 = 15 * 60 * 1000
-                                let snappedStart = new Date(Math.round(start.getTime() / ms15) * ms15)
-                                let snappedEnd = new Date(Math.round(end.getTime() / ms15) * ms15)
-
-                                if (snappedStart.getTime() === snappedEnd.getTime()) {
-                                    snappedEnd = new Date(snappedStart.getTime() + ms15)
-                                }
-
-                                openModal(snappedStart, snappedEnd)
-                                info.view.calendar.unselect()
-                            }}
-                            eventDrop={async (info) => {
-                                const { event } = info
-                                try {
-                                    const res = await fetch('/api/reschedule', {
-                                        method: 'POST',
-                                        headers: { 'Content-Type': 'application/json' },
-                                        body: JSON.stringify({
-                                            blockId: event.id,
-                                            action: 'MOVE',
-                                            newStart: event.start?.toISOString(),
-                                            newEnd: event.end?.toISOString()
-                                        })
-                                    })
-                                    if (!res.ok) info.revert()
-                                } catch (err) { info.revert() }
-                            }}
-                            eventResize={async (info) => {
-                                const { event } = info
-                                try {
-                                    const res = await fetch('/api/reschedule', {
-                                        method: 'POST',
-                                        headers: { 'Content-Type': 'application/json' },
-                                        body: JSON.stringify({
-                                            blockId: event.id,
-                                            action: 'MOVE',
-                                            newStart: event.start?.toISOString(),
-                                            newEnd: event.end?.toISOString()
-                                        })
-                                    })
-                                    if (!res.ok) info.revert()
-                                } catch (err) { info.revert() }
-                            }}
-                            eventContent={renderEventContent}
-                            dayHeaderContent={renderDayHeader}
-                        />
+                    <div className="w-full lg:w-[360px] glass rounded-[40px] overflow-hidden shadow-2xl flex flex-col">
+                        <TaskInbox />
                     </div>
-                </div>
-
-                <TaskInbox />
+                </main>
             </div>
 
             <TaskModal />
 
             <style dangerouslySetInnerHTML={{
                 __html: `
-                .fc { 
-                    --fc-border-color: rgba(255, 255, 255, 0.03); 
-                    --fc-today-bg-color: rgba(59, 130, 246, 0.03); 
-                }
-                .fc .fc-toolbar-title { font-size: 2rem; font-weight: 900; color: white; letter-spacing: -0.05em; }
+                .fc .fc-toolbar-title { font-size: 1.5rem !important; font-weight: 1000 !important; color: #0f172a; tracking: -0.05em; }
                 .fc .fc-button-primary { 
-                    background: rgba(255, 255, 255, 0.05); 
-                    border: 1px solid rgba(255, 255, 255, 0.05); 
-                    color: rgba(255, 255, 255, 0.6); 
-                    font-weight: 800; 
-                    border-radius: 14px; 
-                    padding: 8px 16px; 
-                    transition: all 0.2s ease;
+                    background: #ffffff !important; 
+                    border: 1px solid #e2e8f0 !important; 
+                    color: #64748b !important; 
+                    font-size: 11px !important;
+                    font-weight: 900 !important; 
+                    text-transform: uppercase !important;
+                    padding: 8px 16px !important;
+                    border-radius: 12px !important;
+                    box-shadow: 0 1px 2px rgba(0,0,0,0.05) !important;
                 }
-                .fc .fc-button-primary:hover { background: rgba(255, 255, 255, 0.1); color: white; }
-                .fc .fc-button-active { background: #3b82f6 !important; color: white !important; }
+                .fc .fc-button-primary:hover { border-color: #cbd5e1 !important; color: #0f172a !important; background: #f8fafc !important; }
+                .fc .fc-button-active { background: #0f172a !important; color: white !important; border-color: #0f172a !important; }
                 
-                .fc-day-sun .fc-col-header-cell-cushion { color: #f87171 !important; }
-                .fc-day-sat .fc-col-header-cell-cushion { color: #60a5fa !important; }
-
-                .fc-v-event { background: transparent !important; border: none !important; box-shadow: none !important; }
+                .fc-timegrid-slot-label-cushion { color: #94a3b8 !important; font-size: 11px !important; font-weight: 800 !important; }
+                .fc-col-header-cell { border-bottom: 2px solid #f1f5f9 !important; }
                 
-                /* Selection Highlight Styling */
+                .fc-v-event { background: transparent !important; border: none !important; box-shadow: none !important; border-radius: 12px !important; }
+                .fc-event-main { padding: 0 !important; border-radius: 12px !important; background: transparent !important; }
+                
                 .fc-highlight { 
-                    background: rgba(59, 130, 246, 0.15) !important; 
-                    border-radius: 24px !important;
-                    border: 1px dashed rgba(59, 130, 246, 0.4) !important;
+                    background: rgba(37, 99, 235, 0.1) !important; 
+                    border: none !important;
+                    border-radius: 12px !important;
                 }
-                
-                .fc-timegrid-slot-minor { border-top-style: none !important; }
-                .fc-timegrid-slot-lane { border-bottom: 2px solid rgba(255,255,255,0.08) !important; }
-                
-                .fc-timegrid-slot-label { font-size: 11px; font-weight: 900; color: rgba(255,255,255,0.2) !important; text-transform: uppercase; padding-right: 12px !important; }
-                .fc-col-header-cell { padding: 12px 0 !important; background: transparent; border-bottom: 1px solid rgba(255,255,255,0.05) !important; }
-                .fc-col-header-cell-cushion { font-size: 11px; font-weight: 900; color: rgba(255,255,255,0.5); text-decoration: none !important; text-transform: uppercase; letter-spacing: 0.1em; }
-                
-                .fc-timegrid-now-indicator-line { border-color: #3b82f6; border-width: 2px; }
-                .fc-timegrid-now-indicator-arrow { border-color: #3b82f6; border-width: 6px; }
 
-                .time-floating-bubble {
-                    animation: bubbleIn 0.3s cubic-bezier(0.23, 1, 0.32, 1);
-                    pointer-events: none;
-                }
-                @keyframes bubbleIn {
-                    from { transform: scale(0.8) translateY(10px); opacity: 0; }
-                    to { transform: scale(1) translateY(0); opacity: 1; }
-                }
-                /* Enhance Resize Handles */
-                .fc-v-event .fc-event-resizer {
-                    height: 12px !important;
-                    bottom: -6px !important;
-                    z-index: 10;
-                    cursor: ns-resize !important;
-                }
+                .fc-v-event .fc-event-resizer { height: 12px !important; bottom: -6px !important; }
                 .fc-v-event .fc-event-resizer::after {
-                    content: "";
-                    position: absolute;
-                    left: 50%;
-                    bottom: 4px;
-                    width: 20px;
-                    height: 3px;
-                    background: rgba(255, 255, 255, 0.3);
-                    border-radius: 2px;
-                    transform: translateX(-50%);
+                    content: ""; position: absolute; left: 50%; bottom: 5px; width: 24px; height: 4px;
+                    background: rgba(0, 0, 0, 0.1); border-radius: 2px; transform: translateX(-50%);
+                }
+
+                .fc-now-indicator-line {
+                    border-color: #3b82f6 !important;
+                    border-top-width: 2px !important;
+                }
+                .fc-now-indicator-arrow {
+                    border-color: #3b82f6 !important;
+                    border-width: 5px 0 5px 6px !important;
+                    border-top-color: transparent !important;
+                    border-bottom-color: transparent !important;
                 }
                 `}} />
         </div>
