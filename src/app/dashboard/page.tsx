@@ -126,10 +126,10 @@ export default function DashboardPage() {
                     const slotIndex = Math.floor(relativeY / slotHeight)
                     const snappedY = sRect.top + (slotIndex * slotHeight)
 
-                    const hour = 7 + Math.floor(slotIndex / 4)
+                    const hour = Math.floor(slotIndex / 4)
                     const min = (slotIndex % 4) * 15
 
-                    if (hour >= 7 && hour < 25) {
+                    if (hour >= 0 && hour < 24) {
                         hoverRef.current.innerText = `${hour.toString().padStart(2, '0')}:${min.toString().padStart(2, '0')}`
                         hoverRef.current.style.transform = `translate3d(${centerX}px, ${snappedY}px, 0) translate(-50%, -100%)`
                         hoverRef.current.style.opacity = '1'
@@ -182,8 +182,8 @@ export default function DashboardPage() {
             if (api) {
                 const now = new Date()
                 const hour = now.getHours()
-                // Default to showing current time +/- 2 hours
-                const scrollHour = Math.max(7, hour - 2)
+                // Center the current hour (show 2 hours before)
+                const scrollHour = Math.max(0, hour - 2)
                 const timeStr = `${scrollHour.toString().padStart(2, '0')}:00:00`
                 api.scrollToTime(timeStr)
             }
@@ -376,10 +376,10 @@ export default function DashboardPage() {
                         {showScrollToNow && (
                             <button
                                 onClick={scrollToNow}
-                                className="absolute bottom-10 left-1/2 -translate-x-1/2 z-[40] bg-blue-600 text-white px-6 py-3 rounded-full font-black shadow-2xl hover:bg-blue-700 transition-all animate-in slide-in-from-bottom-4 flex items-center gap-2"
+                                className="absolute bottom-6 right-6 z-[40] bg-blue-600 text-white w-12 h-12 rounded-full font-black shadow-2xl hover:bg-blue-700 transition-all hover:scale-110 active:scale-95 animate-in fade-in zoom-in slide-in-from-bottom-4 flex items-center justify-center group"
+                                title="Return to Now"
                             >
-                                <Clock className="w-4 h-4" />
-                                Return to Now
+                                <Clock className="w-6 h-6 group-hover:rotate-12 transition-transform" />
                             </button>
                         )}
 
@@ -404,8 +404,8 @@ export default function DashboardPage() {
                                 dayMaxEvents={true}
                                 nowIndicator={true}
                                 allDaySlot={false}
-                                slotMinTime="07:00:00"
-                                slotMaxTime="25:00:00"
+                                slotMinTime="00:00:00"
+                                slotMaxTime="24:00:00"
                                 slotDuration="00:15:00"
                                 slotLabelInterval="01:00:00"
                                 snapDuration="00:05:00"
