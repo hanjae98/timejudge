@@ -61,9 +61,9 @@ export default function DashboardPage() {
         if (api) {
             const now = new Date()
             const hour = now.getHours()
+            // Center 'now' by scrolling to 2 hours before it
             const scrollHour = Math.max(0, hour - 2)
-            const timeStr = `${scrollHour.toString().padStart(2, '0')}:00:00`
-            api.scrollToTime(timeStr)
+            api.scrollToTime(`${scrollHour.toString().padStart(2, '0')}:00:00`)
             setShowScrollToNow(false)
         }
     }
@@ -81,17 +81,53 @@ export default function DashboardPage() {
         if (res.ok) fetchEvents()
     }
 
-    // Initialize
     useEffect(() => {
         fetchEvents()
     }, [])
 
-    // Hover Preview & Scroll Monitoring
+    // Hybrid Deterministic Scroll Monitoring
     useEffect(() => {
         const body = document.querySelector('.fc-timegrid-body')
         if (!body || loading) return
 
         let rafId: number
+
+        const handleCalendarScroll = (e: any) => {
+            const scrollEl = e.target as HTMLElement
+            // Only care about the core grid scroller (the large one)
+            if (!scrollEl.classList.contains('fc-scroller') || scrollEl.clientHeight < 300) return
+
+            const now = new Date()
+            const nowIndicator = scrollEl.querySelector('.fc-now-indicator-line') as HTMLElement
+
+            if (nowIndicator) {
+                const scrollerRect = scrollEl.getBoundingClientRect()
+                const indicatorRect = nowIndicator.getBoundingClientRect()
+
+                // Purely visual: Is the line actually between the top and bottom of the scroller?
+                // Add margins so it doesn't blink while still visible at edges
+                const isVisible = (indicatorRect.top >= scrollerRect.top + 20 && indicatorRect.bottom <= scrollerRect.bottom - 20)
+
+                setShowScrollToNow(!isVisible)
+                if (!isVisible) {
+                    // Correct directional mapping
+                    // If 'now' is physically above the viewport top -> Point UP
+                    // If 'now' is physically below the viewport bottom -> Point DOWN
+                    setScrollAlignment(indicatorRect.top < scrollerRect.top ? 'up' : 'down')
+                }
+            } else {
+                // If not in DOM, it's definitely not visible. Use calculation.
+                const timeBody = scrollEl.querySelector('.fc-timegrid-body') as HTMLElement
+                if (timeBody) {
+                    const nowTotalMin = now.getHours() * 60 + now.getMinutes()
+                    const totalH = timeBody.offsetHeight
+                    const nowY = (nowTotalMin / 1440) * totalH
+
+                    setShowScrollToNow(true)
+                    setScrollAlignment(nowY < scrollEl.scrollTop ? 'up' : 'down')
+                }
+            }
+        }
 
         const updateHover = () => {
             const { x: clientX, y: clientY } = mousePosRef.current
@@ -107,10 +143,9 @@ export default function DashboardPage() {
                 return
             }
 
-            const slots = document.querySelector('.fc-timegrid-slots')
-            const cols = document.querySelectorAll('.fc-timegrid-col')
             const firstSlot = document.querySelector('.fc-timegrid-slot')
-            if (!slots || cols.length === 0 || !hoverRef.current || !firstSlot) return
+            const cols = document.querySelectorAll('.fc-timegrid-col')
+            if (cols.length === 0 || !hoverRef.current || !firstSlot) return
 
             const sRect = firstSlot.getBoundingClientRect()
             const slotHeight = sRect.height
@@ -142,72 +177,37 @@ export default function DashboardPage() {
             }
         }
 
-        const handleCalendarScroll = (e: any) => {
-            const scrollEl = e.target
-            if (scrollEl.classList.contains('fc-scroller')) {
-                // Time-based visibility check instead of finicky DOM polling
-                const now = new Date()
-                const nowHour = now.getHours()
-                const nowMin = now.getMinutes()
-
-                const firstSlot = scrollEl.querySelector('.fc-timegrid-slot')
-                if (!firstSlot) return
-
-                const slotHeight = firstSlot.getBoundingClientRect().height
-                const nowPos = (nowHour * 4 + (nowMin / 15)) * slotHeight
-
-                const currentScroll = scrollEl.scrollTop
-                const viewportHeight = scrollEl.clientHeight
-
-                // Buffer to consider "Now" as visible: within 100px from edges
-                const isVisible = (nowPos >= currentScroll + 80 && nowPos <= currentScroll + viewportHeight - 80)
-
-                setShowScrollToNow(!isVisible)
-                if (!isVisible) {
-                    setScrollAlignment(nowPos < currentScroll + (viewportHeight / 2) ? 'up' : 'down')
-                }
-            }
-        }
-
         const handleMouseMove = (e: MouseEvent) => {
             mousePosRef.current = { x: e.clientX, y: e.clientY }
             cancelAnimationFrame(rafId)
             rafId = requestAnimationFrame(updateHover)
         }
 
-        const handleScroll = () => {
+        const handleBodyScroll = () => {
             cancelAnimationFrame(rafId)
             rafId = requestAnimationFrame(updateHover)
         }
 
-        const handleMouseDown = () => setIsSelecting(true)
-        const handleMouseUp = () => setIsSelecting(false)
-
         window.addEventListener('mousemove', handleMouseMove)
-        window.addEventListener('scroll', handleScroll, true)
+        window.addEventListener('scroll', handleBodyScroll, true)
         window.addEventListener('scroll', handleCalendarScroll, true)
-        body.addEventListener('mousedown', handleMouseDown)
-        window.addEventListener('mouseup', handleMouseUp)
 
         return () => {
             cancelAnimationFrame(rafId)
             window.removeEventListener('mousemove', handleMouseMove)
-            window.removeEventListener('scroll', handleScroll, true)
+            window.removeEventListener('scroll', handleBodyScroll, true)
             window.removeEventListener('scroll', handleCalendarScroll, true)
-            body.removeEventListener('mousedown', handleMouseDown)
-            window.removeEventListener('mouseup', handleMouseUp)
         }
     }, [isSelecting, isOpen, loading])
 
-    // Initial Scroll
+    // Center viewport on start
     useEffect(() => {
         if (loading) return;
         const timer = setTimeout(() => {
             const api = calendarRef.current?.getApi()
             if (api) {
                 const now = new Date()
-                const hour = now.getHours()
-                const scrollHour = Math.max(0, hour - 2)
+                const scrollHour = Math.max(0, now.getHours() - 2)
                 api.scrollToTime(`${scrollHour.toString().padStart(2, '0')}:00:00`)
             }
         }, 800)
@@ -510,7 +510,8 @@ export default function DashboardPage() {
                 .fc-now-indicator-line {
                     border-color: #10b981 !important;
                     border-top-width: 3px !important;
-                    box-shadow: 0 0 10px rgba(16, 185, 129, 0.4);
+                    box-shadow: 0 0 15px rgba(16, 185, 129, 0.4);
+                    z-index: 100 !important;
                 }
                 .fc-now-indicator-arrow {
                     border-color: #10b981 !important;
