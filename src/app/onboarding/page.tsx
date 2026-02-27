@@ -2,245 +2,252 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { Briefcase, BookOpen, Monitor, ArrowRight, ArrowLeft, CheckCircle2, Loader2 } from 'lucide-react'
-import interactionPlugin from '@fullcalendar/interaction'
-import timeGridPlugin from '@fullcalendar/timegrid'
-import FullCalendar from '@fullcalendar/react'
+import { motion, AnimatePresence } from 'framer-motion'
+import { GraduationCap, Briefcase, Palette, Moon, Sun, Coffee, Dumbbell, Rocket, Loader2 } from 'lucide-react'
+import { Button } from '@/components/ui/button'
 import { createClient } from '@/lib/supabase/client'
+import { Persona, RoutineBlock } from '@/types/timejudge'
 
-type Step = 1 | 2 | 3
-type Role = '학생' | '직장인' | '프리랜서' | '기타' | null
+const personas = [
+    { id: 'student' as Persona, label: 'Student', icon: GraduationCap, desc: 'Classes, study sessions, and campus life' },
+    { id: 'professional' as Persona, label: 'Professional', icon: Briefcase, desc: 'Meetings, deep work, and career growth' },
+    { id: 'freelancer' as Persona, label: 'Freelancer', icon: Palette, desc: 'Flexible schedule, projects, and clients' },
+]
+
+const defaultRoutines: RoutineBlock[] = [
+    { id: 'r1', type: 'sleep', label: 'Sleep', startHour: 23, endHour: 7 },
+    { id: 'r2', type: 'work', label: 'Work / Study', startHour: 9, endHour: 17 },
+    { id: 'r3', type: 'meal', label: 'Lunch', startHour: 12, endHour: 13 },
+    { id: 'r4', type: 'exercise', label: 'Exercise', startHour: 7, endHour: 8 },
+]
+
+const routineIcons = { sleep: Moon, work: Sun, meal: Coffee, exercise: Dumbbell }
 
 export default function OnboardingPage() {
+    const [step, setStep] = useState(0)
+    const [persona, setPersona] = useState<Persona | null>(null)
+    const [routines, setRoutines] = useState<RoutineBlock[]>(defaultRoutines)
+    const [launching, setLaunching] = useState(false)
+    const [loading, setLoading] = useState(false)
     const router = useRouter()
     const supabase = createClient()
-    const [step, setStep] = useState<Step>(1)
-    const [selectedRole, setSelectedRole] = useState<Role>(null)
-    const [loading, setLoading] = useState(false)
-    const [events, setEvents] = useState<any[]>([
-        { title: '수면 (가이드)', startTime: '00:00', endTime: '07:00', daysOfWeek: [0, 1, 2, 3, 4, 5, 6], color: '#cbd5e1' },
-    ])
 
-    const handleRoleSelect = (role: Role) => {
-        setSelectedRole(role)
-        if (role === '직장인') {
-            setEvents([
-                { title: '수면', startTime: '00:00', endTime: '07:30', daysOfWeek: [0, 1, 2, 3, 4, 5, 6], color: '#cbd5e1' },
-                { title: '업무', startTime: '09:00', endTime: '18:00', daysOfWeek: [1, 2, 3, 4, 5], color: '#94a3b8' },
-            ])
-        } else if (role === '학생') {
-            setEvents([
-                { title: '수면', startTime: '01:00', endTime: '08:00', daysOfWeek: [0, 1, 2, 3, 4, 5, 6], color: '#cbd5e1' },
-            ])
-        }
+    const updateRoutine = (id: string, field: 'startHour' | 'endHour', value: number) => {
+        setRoutines(prev => prev.map(r => r.id === id ? { ...r, [field]: value } : r))
     }
 
-    const nextStep = () => setStep((s) => Math.min(s + 1, 3) as Step)
-    const prevStep = () => setStep((s) => Math.max(s - 1, 1) as Step)
-
-    const handleFinish = async () => {
+    const handleLaunch = async () => {
         setLoading(true)
+        setLaunching(true)
         try {
             const { data: { user } } = await supabase.auth.getUser()
             if (user) {
                 const { error } = await supabase
                     .from('users')
                     .update({
-                        job_role: selectedRole,
-                        fixed_routines: events,
-                        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone
+                        job_role: persona,
+                        fixed_routines: routines,
+                        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+                        onboarding_complete: true
                     })
                     .eq('id', user.id)
 
                 if (error) throw error
             }
-            router.push('/dashboard')
+
+            // Artificial delay for launch animation
+            setTimeout(() => {
+                router.push('/dashboard')
+            }, 2000)
         } catch (err) {
             console.error(err)
             alert('설정 저장 중 오류가 발생했습니다.')
+            setLaunching(false)
         } finally {
             setLoading(false)
         }
     }
 
     return (
-        <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-50 flex flex-col pt-12 text-gray-900">
-            <div className="max-w-4xl w-full mx-auto p-4 flex-1 flex flex-col">
-                {/* Progress Bar */}
-                <div className="mb-8 px-4">
-                    <div className="flex gap-2">
-                        {[1, 2, 3].map((s) => (
-                            <div
-                                key={s}
-                                className={`h-2 flex-1 rounded-full transition-all duration-300 ${s <= step ? 'bg-blue-600' : 'bg-gray-200'
-                                    }`}
-                            />
-                        ))}
-                    </div>
-                    <p className="mt-2 text-sm text-gray-500 font-medium text-right">Step {step} of 3</p>
+        <div className="min-h-screen cosmic-gradient flex items-center justify-center p-4">
+            <div className="w-full max-w-2xl">
+                {/* Progress */}
+                <div className="flex gap-2 mb-8 justify-center">
+                    {[0, 1, 2].map(i => (
+                        <div
+                            key={i}
+                            className={`h-1 rounded-full transition-all duration-500 ${i <= step ? 'w-16 bg-primary' : 'w-8 bg-muted'
+                                }`}
+                        />
+                    ))}
                 </div>
 
-                {/* Step 1: Role Selection */}
-                {step === 1 && (
-                    <div className="bg-white rounded-3xl p-8 md:p-12 shadow-xl flex-1 flex flex-col justify-center animate-in fade-in slide-in-from-bottom-8 duration-500">
-                        <h1 className="text-3xl md:text-4xl font-extrabold mb-4 text-center">어떤 일을 하시나요?</h1>
-                        <p className="text-gray-500 text-center mb-10">
-                            라이프스타일에 맞게 기본 루틴을 설계해 드릴게요.
-                        </p>
-
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-12">
-                            <RoleCard
-                                icon={<BookOpen className="w-8 h-8" />}
-                                title="학생"
-                                desc="수업, 과제, 시험 준비가 많은 일상"
-                                selected={selectedRole === '학생'}
-                                onClick={() => handleRoleSelect('학생')}
-                            />
-                            <RoleCard
-                                icon={<Briefcase className="w-8 h-8" />}
-                                title="직장인"
-                                desc="규칙적인 출퇴근과 업무 시간이 있는 일상"
-                                selected={selectedRole === '직장인'}
-                                onClick={() => handleRoleSelect('직장인')}
-                            />
-                            <RoleCard
-                                icon={<Monitor className="w-8 h-8" />}
-                                title="프리랜서"
-                                desc="일정이 유동적이고 자기 주도적인 일상"
-                                selected={selectedRole === '프리랜서'}
-                                onClick={() => handleRoleSelect('프리랜서')}
-                            />
-                        </div>
-
-                        <div className="flex justify-end mt-auto">
-                            <button
-                                onClick={nextStep}
-                                disabled={!selectedRole}
-                                className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-8 py-4 rounded-2xl font-semibold transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-lg hover:shadow-blue-500/30"
-                            >
-                                다음 <span><ArrowRight className="w-5 h-5" /></span>
-                            </button>
-                        </div>
-                    </div>
-                )}
-
-                {/* Step 2: Fixed Routine Box */}
-                {step === 2 && (
-                    <div className="bg-white rounded-3xl p-8 shadow-xl flex-1 flex flex-col animate-in fade-in slide-in-from-bottom-8 duration-500">
-                        <div className="mb-6">
-                            <h1 className="text-3xl font-extrabold mb-2">고정 일정을 설정하세요</h1>
-                            <p className="text-gray-500">
-                                수면, 식사, 고정 근무 시간 등을 드래그하여 만들어주세요. <br />
-                                기존 Google 캘린더 일정과 자동으로 동기화되어 중복을 피합니다.
-                            </p>
-                        </div>
-
-                        <div className="flex-1 bg-gray-50 rounded-xl border border-gray-100 overflow-hidden relative min-h-[400px]">
-                            <FullCalendar
-                                plugins={[timeGridPlugin, interactionPlugin]}
-                                initialView="timeGridWeek"
-                                headerToolbar={false}
-                                allDaySlot={false}
-                                slotMinTime="00:00:00"
-                                slotMaxTime="24:00:00"
-                                height="100%"
-                                editable={true}
-                                selectable={true}
-                                selectMirror={true}
-                                dayHeaders={true}
-                                nowIndicator={true}
-                                events={events}
-                                select={(info) => {
-                                    const title = prompt('일정 이름을 입력하세요 (예: 식사, 운동 등)')
-                                    if (title) {
-                                        const newEvent = {
-                                            id: crypto.randomUUID(),
-                                            title,
-                                            start: info.startStr,
-                                            end: info.endStr,
-                                            allDay: info.allDay,
-                                            color: '#94a3b8'
-                                        }
-                                        setEvents([...events, newEvent])
-                                    }
-                                    info.view.calendar.unselect()
-                                }}
-                                eventDrop={(info) => {
-                                    const updatedEvents = events.map(ev =>
-                                        ev.id === info.event.id || (ev.title === info.event.title && ev.startTime === info.event.extendedProps.startTime)
-                                            ? { ...ev, start: info.event.startStr, end: info.event.endStr }
-                                            : ev
-                                    )
-                                    setEvents(updatedEvents)
-                                }}
-                                eventResize={(info) => {
-                                    const updatedEvents = events.map(ev =>
-                                        ev.id === info.event.id
-                                            ? { ...ev, start: info.event.startStr, end: info.event.endStr }
-                                            : ev
-                                    )
-                                    setEvents(updatedEvents)
-                                }}
-                                eventClick={(info) => {
-                                    if (confirm(`'${info.event.title}' 일정을 삭제하시겠습니까?`)) {
-                                        info.event.remove()
-                                        setEvents(events.filter(ev => ev.id !== info.event.id))
-                                    }
-                                }}
-                            />
-                        </div>
-
-                        <div className="flex justify-between mt-8">
-                            <button onClick={prevStep} className="flex items-center gap-2 text-gray-500 hover:text-gray-800 px-6 py-4 font-semibold transition-colors">
-                                <ArrowLeft className="w-5 h-5" /> 이전
-                            </button>
-                            <button onClick={nextStep} className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-8 py-4 rounded-2xl font-semibold transition-all shadow-lg">
-                                스케줄 확정 <ArrowRight className="w-5 h-5" />
-                            </button>
-                        </div>
-                    </div>
-                )}
-
-                {/* Step 3: Complete */}
-                {step === 3 && (
-                    <div className="bg-white rounded-3xl p-8 md:p-12 shadow-xl flex-1 flex flex-col justify-center items-center text-center animate-in fade-in zoom-in-95 duration-500">
-                        <div className="w-24 h-24 bg-green-100 rounded-full flex items-center justify-center mb-8">
-                            <CheckCircle2 className="w-12 h-12 text-green-600" />
-                        </div>
-                        <h1 className="text-4xl font-extrabold mb-4">준비 완료!</h1>
-                        <p className="text-gray-500 mb-10 max-w-md">
-                            Google Calendar와 동기화가 완료되었습니다.<br />
-                            이제 할 일만 입력하면 AI가 남는 시간에 자동으로 스케줄링해 줍니다.
-                        </p>
-                        <button
-                            onClick={handleFinish}
-                            disabled={loading}
-                            className="bg-gray-900 hover:bg-black text-white px-10 py-4 rounded-2xl font-semibold text-lg transition-all shadow-xl hover:shadow-2xl hover:-translate-y-1 flex items-center gap-2"
+                <AnimatePresence mode="wait">
+                    {step === 0 && (
+                        <motion.div
+                            key="step0"
+                            initial={{ opacity: 0, y: 30 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            exit={{ opacity: 0, y: -30 }}
+                            transition={{ duration: 0.4 }}
+                            className="space-y-8"
                         >
-                            {loading && <Loader2 className="w-5 h-5 animate-spin" />}
-                            내 캘린더 이동하기
-                        </button>
-                    </div>
-                )}
-            </div>
-        </div>
-    )
-}
+                            <div className="text-center space-y-2">
+                                <h1 className="text-4xl font-black text-gradient tracking-tight">Who are you?</h1>
+                                <p className="text-muted-foreground">Select your persona to customize your universe</p>
+                            </div>
 
-function RoleCard({ icon, title, desc, selected, onClick }: { icon: React.ReactNode, title: string, desc: string, selected: boolean, onClick: () => void }) {
-    return (
-        <div
-            onClick={onClick}
-            className={`cursor-pointer rounded-2xl p-6 border-2 transition-all duration-200 ${selected
-                ? 'border-blue-600 bg-blue-50/50 shadow-md ring-4 ring-blue-600/10'
-                : 'border-gray-100 hover:border-gray-200 hover:bg-gray-50'
-                }`}
-        >
-            <div className={`w-14 h-14 rounded-xl flex items-center justify-center mb-4 ${selected ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-500'}`}>
-                {icon}
+                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                                {personas.map(p => {
+                                    const Icon = p.icon
+                                    const selected = persona === p.id
+                                    return (
+                                        <motion.button
+                                            key={p.id}
+                                            whileHover={{ scale: 1.03 }}
+                                            whileTap={{ scale: 0.97 }}
+                                            onClick={() => setPersona(p.id)}
+                                            className={`glass rounded-2xl p-6 text-left transition-all duration-300 ${selected ? 'cosmic-glow-strong border-primary/60 bg-primary/5' : 'hover:border-primary/30'
+                                                }`}
+                                        >
+                                            <div className={`w-12 h-12 rounded-xl flex items-center justify-center mb-4 ${selected ? 'bg-primary/20' : 'bg-muted'
+                                                }`}>
+                                                <Icon className={`w-6 h-6 ${selected ? 'text-primary' : 'text-muted-foreground'}`} />
+                                            </div>
+                                            <h3 className="font-bold text-foreground mb-1">{p.label}</h3>
+                                            <p className="text-xs text-muted-foreground leading-relaxed">{p.desc}</p>
+                                        </motion.button>
+                                    )
+                                })}
+                            </div>
+
+                            <div className="flex justify-center">
+                                <Button
+                                    size="lg"
+                                    disabled={!persona}
+                                    onClick={() => setStep(1)}
+                                    className="px-8 rounded-xl h-14 text-base font-bold transition-all hover:scale-105 active:scale-95"
+                                >
+                                    Continue
+                                </Button>
+                            </div>
+                        </motion.div>
+                    )}
+
+                    {step === 1 && (
+                        <motion.div
+                            key="step1"
+                            initial={{ opacity: 0, y: 30 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            exit={{ opacity: 0, y: -30 }}
+                            transition={{ duration: 0.4 }}
+                            className="space-y-8"
+                        >
+                            <div className="text-center space-y-2">
+                                <h1 className="text-4xl font-black text-gradient tracking-tight">Fixed Routines</h1>
+                                <p className="text-muted-foreground">Set your recurring daily blocks</p>
+                            </div>
+
+                            <div className="space-y-3">
+                                {routines.map(r => {
+                                    const Icon = routineIcons[r.type as keyof typeof routineIcons]
+                                    return (
+                                        <motion.div
+                                            key={r.id}
+                                            initial={{ opacity: 0, x: -20 }}
+                                            animate={{ opacity: 1, x: 0 }}
+                                            className="glass rounded-2xl p-5 flex items-center gap-4 border-white/5"
+                                        >
+                                            <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center">
+                                                <Icon className="w-5 h-5 text-primary" />
+                                            </div>
+                                            <span className="font-bold flex-1 text-foreground">{r.label}</span>
+                                            <div className="flex items-center gap-2 text-sm">
+                                                <select
+                                                    value={r.startHour}
+                                                    onChange={e => updateRoutine(r.id, 'startHour', +e.target.value)}
+                                                    className="bg-muted hover:bg-muted/80 transition-colors rounded-lg px-3 py-1.5 text-foreground border-none outline-none font-bold"
+                                                >
+                                                    {Array.from({ length: 24 }, (_, i) => (
+                                                        <option key={i} value={i}>{String(i).padStart(2, '0')}:00</option>
+                                                    ))}
+                                                </select>
+                                                <span className="text-muted-foreground font-black">→</span>
+                                                <select
+                                                    value={r.endHour}
+                                                    onChange={e => updateRoutine(r.id, 'endHour', +e.target.value)}
+                                                    className="bg-muted hover:bg-muted/80 transition-colors rounded-lg px-3 py-1.5 text-foreground border-none outline-none font-bold"
+                                                >
+                                                    {Array.from({ length: 24 }, (_, i) => (
+                                                        <option key={i} value={i}>{String(i).padStart(2, '0')}:00</option>
+                                                    ))}
+                                                </select>
+                                            </div>
+                                        </motion.div>
+                                    )
+                                })}
+                            </div>
+
+                            <div className="flex justify-center gap-3">
+                                <Button variant="ghost" onClick={() => setStep(0)} className="rounded-xl h-14 px-8">Back</Button>
+                                <Button size="lg" onClick={() => setStep(2)} className="px-10 rounded-xl h-14 text-base font-bold transition-all hover:scale-105 active:scale-95 shadow-lg shadow-primary/20">
+                                    Continue
+                                </Button>
+                            </div>
+                        </motion.div>
+                    )}
+
+                    {step === 2 && (
+                        <motion.div
+                            key="step2"
+                            initial={{ opacity: 0, y: 30 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            exit={{ opacity: 0, y: -30 }}
+                            transition={{ duration: 0.4 }}
+                            className="space-y-8 text-center"
+                        >
+                            <div className="space-y-2">
+                                <h1 className="text-4xl font-black text-gradient tracking-tight">Ready for Launch!</h1>
+                                <p className="text-muted-foreground">Your universe is configured. Let's go!</p>
+                            </div>
+
+                            <div className="relative h-64 flex items-center justify-center">
+                                <motion.div
+                                    animate={launching ? { y: -500, scale: 0.3, opacity: 0 } : { y: [0, -20, 0], rotate: [-45, -40, -45] }}
+                                    transition={launching ? { duration: 1.5, ease: 'easeIn' } : { duration: 2, repeat: Infinity, ease: 'easeInOut' }}
+                                >
+                                    <Rocket className="w-24 h-24 text-primary" />
+                                </motion.div>
+                                {launching && (
+                                    <motion.div
+                                        initial={{ opacity: 0, scale: 0.5 }}
+                                        animate={{ opacity: [0, 1, 0], scale: [0.5, 3, 5] }}
+                                        transition={{ duration: 1.5 }}
+                                        className="absolute inset-0 rounded-full bg-primary/30 blur-[100px]"
+                                    />
+                                )}
+                            </div>
+
+                            <div className="flex justify-center gap-3">
+                                <Button variant="ghost" onClick={() => setStep(1)} disabled={launching} className="rounded-xl h-14 px-8">Back</Button>
+                                <Button
+                                    size="lg"
+                                    onClick={handleLaunch}
+                                    disabled={launching}
+                                    className="px-12 rounded-xl h-14 text-lg font-black cosmic-glow transition-all hover:scale-105 active:scale-95 shadow-xl shadow-primary/30"
+                                >
+                                    {launching ? (
+                                        <div className="flex items-center gap-2">
+                                            <Loader2 className="w-5 h-5 animate-spin" />
+                                            Launching...
+                                        </div>
+                                    ) : 'Launch Universe 🚀'}
+                                </Button>
+                            </div>
+                        </motion.div>
+                    )}
+                </AnimatePresence>
             </div>
-            <h3 className="text-xl font-bold mb-2">{title}</h3>
-            <p className="text-sm text-gray-500 leading-relaxed">{desc}</p>
         </div>
     )
 }

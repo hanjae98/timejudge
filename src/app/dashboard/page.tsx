@@ -1,321 +1,265 @@
 'use client'
 
-import interactionPlugin from '@fullcalendar/interaction'
-import timeGridPlugin from '@fullcalendar/timegrid'
-import dayGridPlugin from '@fullcalendar/daygrid'
-import FullCalendar from '@fullcalendar/react'
-import { Calendar, Loader2, RefreshCw, Plus, Check, Clock, ArrowUp, ArrowDown, Sparkles, X, MousePointer2, Layers, Lock, Unlock, CalendarRange } from 'lucide-react'
-import { useTaskModalStore, TaskRange } from '@/store/calendar'
-import { useState, useEffect, useRef, useMemo } from 'react'
-import TaskModal from '@/components/calendar/TaskModal'
-import TaskInbox from '@/components/calendar/TaskInbox'
+import { format, subDays, addDays, isSameDay, differenceInDays } from 'date-fns'
+import { useState, useEffect, useCallback } from 'react'
+import { motion, AnimatePresence } from 'framer-motion'
+import { Loader2, Lock, Unlock, RefreshCw, Plus, Sparkles, X, Layers, ArrowUp, ArrowDown, Clock, ChevronUp, ChevronDown } from 'lucide-react'
+import CalendarHeader from '@/components/dashboard/CalendarHeader'
+import WeekCalendar from '@/components/dashboard/WeekCalendar'
+import DayCalendar from '@/components/dashboard/DayCalendar'
+import MonthCalendar from '@/components/dashboard/MonthCalendar'
+import TaskInbox from '@/components/dashboard/TaskInbox'
+import EventModal from '@/components/dashboard/EventModal'
+import { UniverseEvent, InboxTask, CalendarView } from '@/types/timejudge'
+import { Button } from '@/components/ui/button'
+
+interface SelectedRange {
+    type: 'single' | 'range';
+    startDate: string;
+    endDate: string;
+    startHour: number;
+    startMinute: number;
+    endHour: number;
+    endMinute: number;
+}
 
 export default function DashboardPage() {
-    const { isOpen, openModal } = useTaskModalStore()
-    const [events, setEvents] = useState<any[]>([])
+    const [events, setEvents] = useState<UniverseEvent[]>([])
+    const [inboxTasks, setInboxTasks] = useState<InboxTask[]>([])
+    const [calendarView, setCalendarView] = useState<CalendarView>('week')
+    const [selectedDate, setSelectedDate] = useState<Date>(new Date())
     const [loading, setLoading] = useState(true)
-    const [isSelecting, setIsSelecting] = useState(false)
-    const mousePosRef = useRef({ x: 0, y: 0 })
-    const hoverRef = useRef<HTMLDivElement>(null)
-    const calendarRef = useRef<FullCalendar>(null)
-    const [completedBadgeId, setCompletedBadgeId] = useState<string | null>(null)
-    const [showScrollToNow, setShowScrollToNow] = useState(false)
-    const [scrollAlignment, setScrollAlignment] = useState<'up' | 'down'>('up')
 
-    // UI Transformation States
+    const [modalOpen, setModalOpen] = useState(false)
+    const [editEvent, setEditEvent] = useState<UniverseEvent | undefined>()
+    const [slotDate, setSlotDate] = useState<string | undefined>()
+    const [slotHour, setSlotHour] = useState<number | undefined>()
+    const [slotMinute, setSlotMinute] = useState<number | undefined>()
+
     const [isLocked, setIsLocked] = useState(true)
-    const [selectedRanges, setSelectedRanges] = useState<TaskRange[]>([])
+    const [selectedRanges, setSelectedRanges] = useState<SelectedRange[]>([])
     const [isMultiSelectMode, setIsMultiSelectMode] = useState(false)
+    const [showScrollToNow, setShowScrollToNow] = useState(false)
 
-    const fetchEvents = async () => {
+    useEffect(() => {
+        const timer = setTimeout(() => {
+            const grid = document.querySelector('.custom-scrollbar');
+            if (grid) {
+                const handleScroll = () => {
+                    setShowScrollToNow(grid.scrollTop > 200);
+                };
+                grid.addEventListener('scroll', handleScroll);
+                return () => grid.removeEventListener('scroll', handleScroll);
+            }
+        }, 1000);
+        return () => clearTimeout(timer);
+    }, []);
+
+    useEffect(() => {
+        fetchData()
+    }, [])
+
+    const fetchData = async () => {
         try {
-            const res = await fetch('/api/events')
-            const data = await res.json()
-            if (Array.isArray(data)) {
-                const formatted = data.map(block => {
-                    const title = block.task?.title || '할 일'
-                    const colors = [
-                        { bg: '#DBEAFE', text: '#1E40AF', border: '#3B82F6' },
-                        { bg: '#F3E8FF', text: '#6B21A8', border: '#A855F7' },
-                        { bg: '#D1FAE5', text: '#065F46', border: '#10B981' },
-                        { bg: '#FEF3C7', text: '#92400E', border: '#F59E0B' },
-                        { bg: '#FEE2E2', text: '#991B1B', border: '#EF4444' },
-                    ]
-                    const hash = title.split('').reduce((acc: number, char: string) => acc + char.charCodeAt(0), 0)
-                    const colorScheme = colors[hash % colors.length]
+            const [eventsRes, inboxRes] = await Promise.all([
+                fetch('/api/events'),
+                fetch('/api/inbox')
+            ])
 
-                    return {
-                        id: block.id,
-                        title,
-                        start: block.start_time,
-                        end: block.end_time,
-                        extendedProps: { ...block, colorScheme }
+            if (!eventsRes.ok || !inboxRes.ok) return;
+
+            const eventsData = await eventsRes.json()
+            const inboxData = await inboxRes.json()
+
+            if (Array.isArray(eventsData)) {
+                const taskGroup: Record<string, any> = {}
+                eventsData.forEach((e: any) => {
+                    const taskId = e.task_id || e.task?.id || e.id
+                    if (!taskGroup[taskId]) {
+                        taskGroup[taskId] = {
+                            id: taskId,
+                            title: e.task?.title || 'No Title',
+                            description: e.task?.description,
+                            priority: (e.task?.priority?.toLowerCase() || 'medium') as any,
+                            color: e.color || 'from-primary to-cosmic-violet',
+                            memo: e.task?.memo,
+                            completed: e.task?.status === 'DONE' || e.is_completed,
+                            isAllDay: e.is_all_day || false,
+                            timeRanges: []
+                        }
                     }
+                    const start = new Date(e.start_time)
+                    const end = new Date(e.end_time)
+                    taskGroup[taskId].timeRanges.push({
+                        id: `tr-${e.id}`,
+                        date: e.start_time.split('T')[0],
+                        startHour: start.getHours(),
+                        startMinute: start.getMinutes(),
+                        endHour: end.getHours(),
+                        endMinute: end.getMinutes(),
+                    })
                 })
-                setEvents(formatted)
+                setEvents(Object.values(taskGroup))
+            }
+
+            if (Array.isArray(inboxData)) {
+                setInboxTasks(inboxData.map((t: any) => ({
+                    id: t.id,
+                    title: t.title,
+                    estimatedMinutes: t.estimated_time_minutes || 30,
+                    priority: (t.priority?.toLowerCase() || 'medium') as any,
+                    analyzing: false,
+                    scheduled: false
+                })))
             }
         } catch (err) {
-            console.error('Failed to fetch events:', err)
+            console.error('Failed to fetch data:', err)
         } finally {
             setLoading(false)
         }
     }
 
-    // Combine Real Events + Selection Highlights
-    const allEvents = useMemo(() => {
-        const selectionHighlights = selectedRanges.map((range, idx) => ({
-            id: `selection-${idx}`,
-            start: range.start,
-            end: range.end,
-            display: 'block',
-            backgroundColor: 'rgba(59, 130, 246, 0.4)',
-            borderColor: '#3B82F6',
-            textColor: '#fff',
-            title: `Selection ${idx + 1}`,
-            classNames: ['selection-highlight-event'],
-            editable: false
-        }))
-        return [...events, ...selectionHighlights]
-    }, [events, selectedRanges])
+    const handleAddEvent = async (event: UniverseEvent) => {
+        setLoading(true)
+        try {
+            await fetch('/api/tasks', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    title: event.title,
+                    description: event.description,
+                    priority: event.priority.toUpperCase(),
+                    timeRanges: event.timeRanges,
+                    memo: event.memo,
+                    dimensions: event.dimensionFields,
+                    isAllDay: event.isAllDay,
+                    isRoutine: event.isRoutine
+                })
+            })
+            await fetchData()
+        } catch (err) {
+            console.error(err)
+        } finally {
+            setLoading(false)
+        }
+    }
+
+    const handleCompleteEvent = async (event: UniverseEvent) => {
+        try {
+            await fetch(`/api/tasks/${event.id}/status`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ status: event.completed ? 'IN_PROGRESS' : 'DONE' })
+            })
+            await fetchData()
+        } catch (err) {
+            console.error('Failed to update event status:', err)
+        }
+    }
+
+    const handleAutoPilot = async () => {
+        setLoading(true)
+        try {
+            await fetch('/api/batch-schedule', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ taskIds: inboxTasks.map(t => t.id) })
+            })
+            await fetchData()
+        } catch (err) {
+            console.error(err)
+        } finally {
+            setLoading(false)
+        }
+    }
+
+    const handleEventClick = (event: UniverseEvent) => {
+        setEditEvent(event)
+        setModalOpen(true)
+    }
+
+    const handleTaskClick = (task: InboxTask) => {
+        const todayStr = new Date().toISOString().split('T')[0]
+        const event: UniverseEvent = {
+            id: `task-${task.id}`,
+            title: task.title,
+            priority: task.priority,
+            color: 'from-primary to-cosmic-violet',
+            timeRanges: [{ id: `tr-${task.id}`, date: todayStr, startHour: 10, startMinute: 0, endHour: 11, endMinute: 0 }],
+            isFromInbox: true,
+        }
+        setEditEvent(event)
+        setModalOpen(true)
+    }
+
+    const handleDrop = async (date: string, hour: number, minute: number, data: any) => {
+        if (data.type === 'inbox-task') {
+            const task = data as InboxTask;
+            const newRange = {
+                date,
+                startHour: hour,
+                startMinute: minute,
+                endHour: hour + (task.estimatedMinutes ? Math.floor(task.estimatedMinutes / 60) : 1),
+                endMinute: (minute + (task.estimatedMinutes ? task.estimatedMinutes % 60 : 0)) % 60
+            };
+            if (minute + (task.estimatedMinutes ? task.estimatedMinutes % 60 : 0) >= 60) {
+                newRange.endHour += 1;
+            }
+            setEditEvent({
+                id: `dropped-${task.id}`,
+                title: task.title,
+                priority: task.priority,
+                color: 'from-primary to-cosmic-violet',
+                timeRanges: [{ id: `tr-dropped-${task.id}`, ...newRange }],
+                isFromInbox: true,
+            })
+            setModalOpen(true)
+        } else if (data.type === 'reschedule') {
+            const { eventId, rangeId } = data;
+            const event = events.find(e => e.id === eventId);
+            if (!event) return;
+            const tr = event.timeRanges.find(r => r.id === rangeId);
+            if (!tr) return;
+            const durationH = tr.endHour - tr.startHour;
+            const durationM = tr.endMinute - tr.startMinute;
+            try {
+                await fetch('/api/reschedule', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        eventId, rangeId, action: 'move', newDate: date,
+                        newStartHour: hour, newStartMinute: minute,
+                        newEndHour: hour + durationH, newEndMinute: minute + durationM
+                    })
+                });
+                fetchData();
+            } catch (err) {
+                console.error('Reschedule failed:', err);
+            }
+        }
+    }
 
     const scrollToNow = () => {
-        const api = calendarRef.current?.getApi()
-        if (api) {
-            const now = new Date()
-            const scrollHour = Math.max(0, now.getHours() - 2)
-            api.scrollToTime(`${scrollHour.toString().padStart(2, '0')}:00:00`)
-            setShowScrollToNow(false)
+        const grid = document.querySelector('.custom-scrollbar');
+        if (grid) {
+            const now = new Date();
+            const currentHour = now.getHours();
+            const hourHeight = calendarView === 'day' ? 100 : 80;
+            const top = Math.max(0, (currentHour - 6) * hourHeight);
+            grid.scrollTo({ top, behavior: 'smooth' });
         }
     }
 
-    async function handleAction(blockId: string, action: 'COMPLETE' | 'RESCHEDULE') {
-        if (action === 'COMPLETE') {
-            setCompletedBadgeId(blockId)
-            setTimeout(() => setCompletedBadgeId(null), 1500)
-        }
-        const res = await fetch('/api/reschedule', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ blockId, action })
-        })
-        if (res.ok) fetchEvents()
-    }
+    const handleConfirmSelection = () => {
+        setIsMultiSelectMode(false)
+        const first = selectedRanges[0]
+        setSlotDate(first.startDate)
+        setSlotHour(first.startHour)
+        setSlotMinute(first.startMinute)
 
-    useEffect(() => {
-        fetchEvents()
-    }, [])
-
-    useEffect(() => {
-        const body = document.querySelector('.fc-timegrid-body')
-        if (!body || loading) return
-
-        let rafId: number
-
-        const handleCalendarScroll = (e: any) => {
-            const scrollEl = e.target as HTMLElement
-            if (!scrollEl.classList.contains('fc-scroller') || scrollEl.clientHeight < 300) return
-
-            const nowIndicator = scrollEl.querySelector('.fc-now-indicator-line') as HTMLElement
-            if (nowIndicator) {
-                const scrollerRect = scrollEl.getBoundingClientRect()
-                const indicatorRect = nowIndicator.getBoundingClientRect()
-                const isVisible = (indicatorRect.top >= scrollerRect.top + 20 && indicatorRect.bottom <= scrollerRect.bottom - 20)
-                setShowScrollToNow(!isVisible)
-                if (!isVisible) {
-                    setScrollAlignment(indicatorRect.top < scrollerRect.top ? 'up' : 'down')
-                }
-            }
-        }
-
-        const updateHover = () => {
-            const { x: clientX, y: clientY } = mousePosRef.current
-            if ((isOpen || isMultiSelectMode) && hoverRef.current) {
-                hoverRef.current.style.opacity = '0'
-                return
-            }
-
-            const target = document.elementFromPoint(clientX, clientY)
-            const eventBox = target?.closest('.fc-event')
-            if (eventBox && !eventBox.classList.contains('fc-event-mirror') && !eventBox.classList.contains('fc-highlight')) {
-                if (hoverRef.current) hoverRef.current.style.opacity = '0'
-                return
-            }
-
-            const firstSlot = document.querySelector('.fc-timegrid-slot')
-            const cols = document.querySelectorAll('.fc-timegrid-col')
-            if (cols.length === 0 || !hoverRef.current || !firstSlot) {
-                if (hoverRef.current) hoverRef.current.style.opacity = '0'
-                return
-            }
-
-            const sRect = firstSlot.getBoundingClientRect()
-            const slotHeight = sRect.height
-            const relativeY = clientY - sRect.top
-
-            let activeColRect: DOMRect | null = null
-            cols.forEach(col => {
-                const r = col.getBoundingClientRect()
-                if (clientX >= r.left && clientX <= r.right) activeColRect = r
-            })
-
-            if (activeColRect) {
-                const centerX = (activeColRect as DOMRect).left + (activeColRect as DOMRect).width / 2
-                const slotIndex = Math.floor(relativeY / slotHeight)
-                const snappedY = sRect.top + (slotIndex * slotHeight)
-                const hour = Math.floor(slotIndex / 4)
-                const min = (slotIndex % 4) * 15
-
-                if (hour >= 0 && hour < 24) {
-                    hoverRef.current.innerText = `${hour.toString().padStart(2, '0')}:${min.toString().padStart(2, '0')}`
-                    hoverRef.current.style.transform = `translate3d(${centerX}px, ${snappedY}px, 0) translate(-50%, -100%)`
-                    hoverRef.current.style.opacity = '1'
-                } else { hoverRef.current.style.opacity = '0' }
-            } else { hoverRef.current.style.opacity = '0' }
-        }
-
-        window.addEventListener('mousemove', (e) => {
-            mousePosRef.current = { x: e.clientX, y: e.clientY }
-            cancelAnimationFrame(rafId)
-            rafId = requestAnimationFrame(updateHover)
-        })
-        window.addEventListener('scroll', updateHover, true)
-        window.addEventListener('scroll', handleCalendarScroll, true)
-
-        return () => {
-            cancelAnimationFrame(rafId)
-            window.removeEventListener('mousemove', updateHover)
-        }
-    }, [isOpen, loading, isMultiSelectMode])
-
-    useEffect(() => {
-        if (loading) return;
-        const timer = setTimeout(() => {
-            const api = calendarRef.current?.getApi()
-            if (api) {
-                const now = new Date()
-                const scrollHour = Math.max(0, now.getHours() - 2)
-                api.scrollToTime(`${scrollHour.toString().padStart(2, '0')}:00:00`)
-            }
-        }, 800)
-        return () => clearTimeout(timer)
-    }, [loading])
-
-    function renderDayHeader(headerInfo: any) {
-        const isToday = headerInfo.isToday
-        return (
-            <div className="flex flex-col items-center py-4 group/header w-full relative">
-                <div className={`text-[10px] font-black tracking-[0.2em] uppercase mb-1 ${isToday ? 'text-blue-600' : 'text-slate-400'}`}>
-                    {headerInfo.date.toLocaleDateString('en-US', { weekday: 'short' })}
-                </div>
-                <div className={`text-2xl font-black tracking-tighter transition-all ${isToday ? 'text-blue-600 scale-110' : 'text-slate-900'}`}>
-                    {headerInfo.date.getDate()}
-                </div>
-                {isToday && <div className="absolute bottom-1 w-1 h-1 rounded-full bg-blue-600 shadow-[0_0_10px_rgba(37,99,235,0.5)]" />}
-            </div>
-        )
-    }
-
-    function renderEventContent(eventInfo: any) {
-        const isSelectionHighlight = eventInfo.event.id.toString().startsWith('selection-')
-        if (isSelectionHighlight) {
-            return (
-                <div className="h-full w-full bg-blue-500/30 border-2 border-dashed border-blue-500 rounded-xl flex items-center justify-center">
-                    <Check className="w-4 h-4 text-blue-600" />
-                </div>
-            )
-        }
-
-        const now = new Date()
-        const start = new Date(eventInfo.event.start)
-        const end = new Date(eventInfo.event.end)
-        const isCurrent = start <= now && end >= now
-        const isCompleted = eventInfo.event.extendedProps.is_completed
-        const color = eventInfo.event.extendedProps.colorScheme || { bg: '#DBEAFE', text: '#1E40AF', border: '#3B82F6' }
-        const isMirror = eventInfo.isMirror
-        const isSelection = isMirror && !eventInfo.event.id
-
-        // Month view unified styling
-        const isMonthView = eventInfo.view.type === 'dayGridMonth'
-        const durationMs = end.getTime() - start.getTime()
-        const isShort = durationMs <= 30 * 60 * 1000
-
-        let displayStart = eventInfo.event.start
-        let displayEnd = eventInfo.event.end
-
-        if (isSelection && displayStart && displayEnd) {
-            const ms15 = 15 * 60 * 1000
-            let s = new Date(Math.round(displayStart.getTime() / ms15) * ms15)
-            let e = new Date(Math.round(displayEnd.getTime() / ms15) * ms15)
-            if (s.getTime() === e.getTime()) e = new Date(s.getTime() + ms15)
-            displayStart = s; displayEnd = e
-        }
-
-        const startTime = displayStart?.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })
-        const endTime = displayEnd?.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })
-
-        return (
-            <div className={`
-                group/event relative h-full w-full rounded-xl transition-all duration-300
-                flex flex-col justify-start overflow-visible border-none
-                ${isCompleted ? 'grayscale opacity-80' : 'shadow-sm'}
-                ${isSelection ? 'bg-blue-400/20' : ''}
-                ${isShort ? 'p-1.5' : 'p-3'}
-                ${isMonthView ? 'month-event-fixed' : ''}
-                ${!isLocked ? 'anim-shake' : ''}
-                ${isMultiSelectMode && !isSelectionHighlight ? 'grayscale-[0.8] opacity-40' : ''}
-                ${isCurrent && !isCompleted ? 'ring-2 ring-emerald-500 ring-offset-2 shadow-[0_0_20px_rgba(16,185,129,0.4)]' : ''}
-            `}
-                style={{
-                    backgroundColor: isCurrent && !isCompleted ? '#ECFDF5' : (isCompleted ? '#E2E8F0' : (isMirror ? 'rgba(37, 99, 235, 0.2)' : color.bg)),
-                }}>
-
-                {isCurrent && !isCompleted && !isMonthView && (
-                    <div className="absolute top-0 right-0 p-1">
-                        <span className="flex h-2 w-2 relative">
-                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                            <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
-                        </span>
-                    </div>
-                )}
-
-                {!isMonthView && completedBadgeId === eventInfo.event.id && (
-                    <div className="absolute inset-0 z-[100] flex items-center justify-center pointer-events-none">
-                        <div className="animate-in fade-in zoom-in-50 duration-500 ease-out flex items-center justify-center">
-                            <Check className="w-12 h-12 text-emerald-500/90 stroke-[1.5px] drop-shadow-[0_0_20px_rgba(16,185,129,0.3)] anim-checking" />
-                        </div>
-                    </div>
-                )}
-
-                <div className="flex flex-col gap-1 min-h-0 w-full">
-                    <div className="flex items-start justify-between gap-2">
-                        <div
-                            className={`
-                                font-black leading-[1.2] tracking-tight break-words line-clamp-2
-                                ${isMonthView ? 'text-[10px]' : (isShort ? 'text-[11px]' : 'text-[13px]')}
-                            `}
-                            style={{ color: isCompleted ? '#94A3B8' : color.text }}
-                        >
-                            {isSelection ? '' : eventInfo.event.title}
-                        </div>
-
-                        {!isMonthView && !isMirror && !isSelection && (
-                            <button
-                                onClick={(e) => { e.stopPropagation(); handleAction(eventInfo.event.id, 'COMPLETE') }}
-                                className={`
-                                    absolute top-1 right-1 transition-all duration-300 flex items-center justify-center
-                                    ${isCompleted
-                                        ? 'text-emerald-500 scale-110 opacity-100'
-                                        : 'text-slate-400 opacity-20 group-hover/event:opacity-100 hover:text-emerald-500 hover:scale-125'
-                                    }
-                                `}
-                            >
-                                <Check className={isShort ? 'w-3 h-3' : 'w-4 h-4'} />
-                            </button>
-                        )}
-                    </div>
-                </div>
-            </div>
-        )
+        // Convert selectedRanges to timeRanges if necessary
+        // For now just open the modal with the first one
+        setModalOpen(true)
     }
 
     const resetSelection = () => {
@@ -323,305 +267,274 @@ export default function DashboardPage() {
         setIsMultiSelectMode(false)
     }
 
-    const confirmSelection = () => {
-        if (selectedRanges.length > 0) {
-            openModal(selectedRanges)
-            resetSelection()
-        }
-    }
-
-    const toggleLock = () => {
-        setIsLocked(!isLocked)
+    const TimeAdjuster = ({ hour, minute, onChange }: { hour: number, minute: number, onChange: (h: number, m: number) => void }) => {
+        return (
+            <div className="flex items-center gap-1 bg-white/5 rounded-lg px-2 py-1 border border-white/5">
+                <div className="flex flex-col items-center">
+                    <button onClick={() => onChange((hour + 1) % 24, minute)} className="text-white/40 hover:text-primary"><ChevronUp className="w-3 h-3" /></button>
+                    <span className="text-[10px] font-black w-4 text-center">{String(hour).padStart(2, '0')}</span>
+                    <button onClick={() => onChange((hour + 23) % 24, minute)} className="text-white/40 hover:text-primary"><ChevronDown className="w-3 h-3" /></button>
+                </div>
+                <span className="text-white/20">:</span>
+                <div className="flex flex-col items-center">
+                    <button onClick={() => onChange(hour, (minute + 15) % 60)} className="text-white/40 hover:text-primary"><ChevronUp className="w-3 h-3" /></button>
+                    <span className="text-[10px] font-black w-4 text-center">{String(minute).padStart(2, '0')}</span>
+                    <button onClick={() => onChange(hour, (minute + 45) % 60)} className="text-white/40 hover:text-primary"><ChevronDown className="w-3 h-3" /></button>
+                </div>
+            </div>
+        )
     }
 
     return (
-        <div className="min-h-screen flex flex-col relative bg-slate-50 text-slate-900 selection:bg-blue-500/20">
-            <div
-                ref={hoverRef}
-                className="fixed pointer-events-none z-[9999] bg-white border border-blue-200 px-2.5 py-1.5 rounded-xl text-[10px] font-black text-blue-600 shadow-2xl opacity-0 will-change-transform"
-                style={{ left: 0, top: 0, transition: 'opacity 0.1s ease-out' }}
+        <div className="h-screen flex flex-col cosmic-gradient overflow-hidden relative">
+            <CalendarHeader
+                view={calendarView}
+                selectedDate={selectedDate}
+                onViewChange={setCalendarView}
+                onDateChange={setSelectedDate}
+                onCreateEvent={() => {
+                    setEditEvent(undefined)
+                    setModalOpen(true)
+                }}
+                isLocked={isLocked}
+                onToggleLock={() => setIsLocked(!isLocked)}
+                onRefresh={fetchData}
             />
 
-            <div className="max-w-[1600px] mx-auto w-full flex flex-col flex-1 p-6 md:p-10 gap-8 z-10">
-                <header className="flex flex-col md:flex-row md:items-end justify-between gap-6">
-                    <div className="flex flex-col gap-2">
-                        <div className="flex items-center gap-2">
-                            <span className="w-3 h-3 rounded-full bg-blue-500" />
-                            <span className="text-[11px] font-black uppercase tracking-[0.3em] text-blue-500/80">Active Session</span>
-                        </div>
-                        <h1 className="text-5xl md:text-6xl font-black text-slate-900 tracking-tighter">
-                            My Universe
-                        </h1>
-                    </div>
+            {/* Selection Hub UI */}
+            <AnimatePresence>
+                {isMultiSelectMode && selectedRanges.length > 0 && (
+                    <motion.div
+                        initial={{ opacity: 0, y: 50, scale: 0.9 }}
+                        animate={{ opacity: 1, y: 0, scale: 1 }}
+                        exit={{ opacity: 0, y: 50, scale: 0.9 }}
+                        className="fixed bottom-32 left-1/2 -translate-x-1/2 z-[100] w-[600px]"
+                    >
+                        <div className="glass-strong border border-white/20 p-6 rounded-[32px] shadow-2xl flex flex-col gap-4 bg-slate-900/60 backdrop-blur-3xl overflow-hidden relative">
+                            {/* Animated Background */}
+                            <div className="absolute inset-0 bg-gradient-to-br from-primary/10 via-transparent to-primary/10 animate-pulse pointer-events-none" />
 
-                    <div className="flex items-center gap-4">
-                        <button
-                            onClick={toggleLock}
-                            className={`flex items-center gap-2 px-6 py-4 rounded-2xl font-black transition-all shadow-sm border ${isLocked
-                                    ? 'bg-white text-slate-400 border-slate-200 hover:text-blue-600'
-                                    : 'bg-amber-100 text-amber-700 border-amber-200 animate-pulse ring-4 ring-amber-500/10'
-                                }`}
-                        >
-                            {isLocked ? <Lock className="w-4 h-4" /> : <Unlock className="w-4 h-4" />}
-                            {isLocked ? 'Locked' : 'Unlocked'}
-                        </button>
-                        <button
-                            onClick={() => window.location.reload()}
-                            className="p-4 rounded-2xl bg-white hover:bg-slate-50 border border-slate-200 transition-all group shadow-sm text-slate-400"
-                        >
-                            <RefreshCw className="w-5 h-5 group-hover:rotate-180 transition-transform duration-500" />
-                        </button>
-                        <button
-                            onClick={() => openModal([{ start: new Date(), end: new Date(Date.now() + 3600000) }])}
-                            className="bg-slate-900 hover:bg-black text-white px-8 py-4 rounded-2xl font-black flex items-center gap-3 shadow-xl hover:shadow-2xl transition-all active:scale-95 group"
-                        >
-                            <Plus className="w-5 h-5 group-hover:rotate-90 transition-transform duration-300" />
-                            <span className="text-lg">Add Event</span>
-                        </button>
-                    </div>
-                </header>
-
-                <main className="flex-1 flex flex-col lg:flex-row gap-8 min-h-0">
-                    <div className="flex-1 glass rounded-[40px] overflow-hidden flex flex-col relative border-white shadow-2xl h-[700px]">
-                        {loading && (
-                            <div className="absolute inset-0 z-50 bg-white/60 backdrop-blur-md flex items-center justify-center">
-                                <Loader2 className="w-12 h-12 text-blue-600 animate-spin" />
-                            </div>
-                        )}
-
-                        {/* Selection Hub UI - Prettier & Better Aligned */}
-                        {isMultiSelectMode && (
-                            <div className="absolute top-6 left-1/2 -translate-x-1/2 z-[45] animate-in slide-in-from-top-4 duration-500 w-[90%] max-w-xl">
-                                <div className="bg-slate-900/90 backdrop-blur-2xl border border-white/20 p-6 rounded-[40px] shadow-[0_32px_64px_-16px_rgba(0,0,0,0.5)] flex flex-col gap-5">
-                                    <div className="flex items-center justify-between">
-                                        <div className="flex items-center gap-4">
-                                            <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-blue-500 to-indigo-500 flex items-center justify-center shadow-lg shadow-blue-500/20">
-                                                <Sparkles className="w-6 h-6 text-white animate-pulse" />
-                                            </div>
-                                            <div>
-                                                <p className="text-lg font-black text-white tracking-tight leading-none mb-1">Do you want more?</p>
-                                                <p className="text-xs font-bold text-slate-400">Drag to bundle multiple time ranges!</p>
-                                            </div>
-                                        </div>
-                                        <button onClick={resetSelection} className="p-3 text-slate-500 hover:text-white hover:bg-white/10 rounded-2xl transition-all">
-                                            <X className="w-5 h-5" />
-                                        </button>
+                            <div className="flex items-center justify-between relative z-10">
+                                <div className="flex items-center gap-4">
+                                    <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-primary to-violet-500 flex items-center justify-center shadow-lg shadow-primary/30">
+                                        <Layers className="w-5 h-5 text-white" />
                                     </div>
-
-                                    <div className="flex items-center gap-3 overflow-x-auto pb-2 custom-scrollbar no-scrollbar scroll-smooth">
-                                        {selectedRanges.map((range, i) => (
-                                            <div key={i} className="bg-white/5 hover:bg-white/10 text-white pl-4 pr-2 py-2 rounded-2xl text-[11px] font-black border border-white/10 shrink-0 flex items-center gap-3 transition-colors group/pill">
-                                                <span className="text-blue-400 font-black">#{i + 1}</span>
-                                                <span className="opacity-80">
-                                                    {range.start.toLocaleDateString('ko-KR', { month: 'numeric', day: 'numeric' })}
-                                                    {range.start.getTime() !== range.end.getTime() &&
-                                                        ` ~ ${range.end.toLocaleDateString('ko-KR', { month: 'numeric', day: 'numeric' })}`}
-                                                </span>
-                                                <button
-                                                    onClick={() => setSelectedRanges(selectedRanges.filter((_, idx) => idx !== i))}
-                                                    className="w-6 h-6 rounded-lg hover:bg-red-500/20 hover:text-red-400 flex items-center justify-center transition-all opacity-40 group-hover/pill:opacity-100"
-                                                >
-                                                    <X className="w-3 h-3" />
-                                                </button>
-                                            </div>
-                                        ))}
-                                    </div>
-
-                                    <div className="flex items-center gap-3 pt-1">
-                                        <button
-                                            onClick={confirmSelection}
-                                            className="flex-1 bg-blue-600 hover:bg-blue-500 text-white py-4 rounded-[24px] font-black text-base transition-all active:scale-[0.98] shadow-xl shadow-blue-500/20 flex items-center justify-center gap-3 group/btn"
-                                        >
-                                            <Layers className="w-5 h-5 group-hover/btn:translate-y-[-2px] transition-transform" />
-                                            Combine {selectedRanges.length} Universes
-                                        </button>
-                                        <button
-                                            onClick={resetSelection}
-                                            className="px-8 bg-white/10 hover:bg-white/20 text-white py-4 rounded-[24px] font-black text-base transition-all active:scale-[0.98]"
-                                        >
-                                            Clear
-                                        </button>
+                                    <div>
+                                        <h3 className="text-sm font-black text-white uppercase tracking-tighter">Temporal Bundle Hub</h3>
+                                        <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">{selectedRanges.length} Vectors Selected</p>
                                     </div>
                                 </div>
+                                <div className="flex items-center gap-4">
+                                    <div className="flex items-center gap-2 bg-primary/20 border border-primary/30 px-3 py-1.5 rounded-full">
+                                        <RefreshCw className="w-3 h-3 text-primary animate-spin-slow" />
+                                        <span className="text-[9px] font-black text-primary uppercase">Routine Mapping</span>
+                                    </div>
+                                    <button onClick={resetSelection} className="p-2 text-muted-foreground hover:text-white transition-colors bg-white/5 rounded-full border border-white/5">
+                                        <X className="w-4 h-4" />
+                                    </button>
+                                </div>
                             </div>
-                        )}
 
-                        {showScrollToNow && (
-                            <button
-                                onClick={scrollToNow}
-                                className="absolute bottom-6 right-6 z-[40] bg-blue-600 text-white w-12 h-12 rounded-full font-black shadow-2xl hover:bg-blue-700 transition-all hover:scale-110 active:scale-95 animate-in fade-in zoom-in slide-in-from-bottom-4 flex items-center justify-center group"
-                                title="Return to Now"
-                            >
-                                {scrollAlignment === 'up' ? (
-                                    <ArrowUp className="w-6 h-6 animate-bounce" />
-                                ) : (
-                                    <ArrowDown className="w-6 h-6 animate-bounce" />
-                                )}
-                            </button>
-                        )}
+                            <div className="flex flex-col gap-3 max-h-[300px] overflow-y-auto luxury-scroller px-1 relative z-10">
+                                {selectedRanges.map((range, i) => (
+                                    <div key={i} className="bg-white/5 border border-white/10 p-3 rounded-2xl flex items-center justify-between group hover:bg-white/10 transition-all border-l-4 border-l-primary/60">
+                                        <div className="flex flex-col gap-1">
+                                            <span className="text-[8px] font-black text-primary uppercase tracking-[0.2em]">Universe Range #{i + 1}</span>
+                                            <div className="flex items-center gap-2">
+                                                <span className="text-xs font-black text-white">{range.startDate}</span>
+                                                {range.type === 'range' && (
+                                                    <>
+                                                        <span className="text-white/20 text-[10px]">~</span>
+                                                        <span className="text-xs font-black text-white">{range.endDate}</span>
+                                                    </>
+                                                )}
+                                            </div>
+                                        </div>
 
-                        <div className="flex-1 p-4 md:p-6 overflow-auto custom-scrollbar fc-viewport-mask h-full">
-                            <FullCalendar
-                                ref={calendarRef}
-                                plugins={[dayGridPlugin, timeGridPlugin, interactionPlugin]}
-                                initialView="timeGridWeek"
-                                firstDay={1}
-                                headerToolbar={{
-                                    left: 'prev,next today',
-                                    center: 'title',
-                                    right: 'dayGridMonth,timeGridWeek,timeGridDay'
-                                }}
-                                height="100%"
-                                stickyHeaderDates={true}
-                                events={allEvents}
-                                editable={!isLocked}
-                                eventResizableFromStart={!isLocked}
-                                selectable={true}
-                                selectMirror={true}
-                                dayMaxEvents={3}
-                                nowIndicator={true}
-                                allDaySlot={true}
-                                allDayMaintainDuration={true}
-                                slotMinTime="00:00:00"
-                                slotMaxTime="24:00:00"
-                                slotDuration="00:15:00"
-                                slotLabelInterval="01:00:00"
-                                snapDuration="00:05:00"
-                                selectMinDistance={1}
-                                eventMinHeight={20}
-                                eventOverlap={false}
-                                slotLabelFormat={{ hour: 'numeric', meridiem: false, hour12: false }}
-                                select={(info) => {
-                                    const ms15 = 15 * 60 * 1000
-                                    let s = new Date(Math.round(new Date(info.start).getTime() / ms15) * ms15)
-                                    let e = new Date(Math.round(new Date(info.end).getTime() / ms15) * ms15)
-                                    if (s.getTime() === e.getTime()) {
-                                        if (info.view.type === 'dayGridMonth') {
-                                            e = new Date(s.getTime() + 86400000 - 1000)
-                                        } else {
-                                            e = new Date(s.getTime() + ms15)
-                                        }
-                                    }
+                                        <div className="flex items-center gap-4">
+                                            <div className="flex items-center gap-2">
+                                                <Clock className="w-3 h-3 text-muted-foreground" />
+                                                <TimeAdjuster
+                                                    hour={range.startHour}
+                                                    minute={range.startMinute}
+                                                    onChange={(h, m) => {
+                                                        const next = [...selectedRanges];
+                                                        next[i] = { ...next[i], startHour: h, startMinute: m };
+                                                        setSelectedRanges(next);
+                                                    }}
+                                                />
+                                                <span className="text-white/20">/</span>
+                                                <TimeAdjuster
+                                                    hour={range.endHour}
+                                                    minute={range.endMinute}
+                                                    onChange={(h, m) => {
+                                                        const next = [...selectedRanges];
+                                                        next[i] = { ...next[i], endHour: h, endMinute: m };
+                                                        setSelectedRanges(next);
+                                                    }}
+                                                />
+                                            </div>
+                                            <button
+                                                onClick={() => setSelectedRanges(selectedRanges.filter((_, idx) => idx !== i))}
+                                                className="w-8 h-8 rounded-xl bg-red-500/10 hover:bg-red-500 text-red-500 hover:text-white flex items-center justify-center transition-all opacity-0 group-hover:opacity-100"
+                                            >
+                                                <X className="w-4 h-4" />
+                                            </button>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
 
-                                    const newRange = { start: s, end: e }
-                                    setSelectedRanges(prev => [...prev, newRange])
-                                    setIsMultiSelectMode(true)
-                                    info.view.calendar.unselect()
-                                }}
-                                eventDrop={async (info) => {
-                                    try {
-                                        await fetch('/api/reschedule', {
-                                            method: 'POST',
-                                            headers: { 'Content-Type': 'application/json' },
-                                            body: JSON.stringify({
-                                                blockId: info.event.id,
-                                                action: 'MOVE',
-                                                newStart: info.event.start?.toISOString(),
-                                                newEnd: info.event.end?.toISOString()
-                                            })
-                                        })
-                                    } catch (err) { info.revert() }
-                                }}
-                                eventContent={renderEventContent}
-                                dayHeaderContent={renderDayHeader}
-                            />
+                            <div className="flex items-center gap-3 pt-2 relative z-10">
+                                <button
+                                    onClick={handleConfirmSelection}
+                                    className="flex-1 bg-primary hover:bg-primary/80 hover:scale-[1.02] active:scale-95 text-white py-4 rounded-2xl font-black text-xs transition-all flex items-center justify-center gap-3 shadow-2xl shadow-primary/40 border border-white/10"
+                                >
+                                    <Sparkles className="w-5 h-5" />
+                                    SYNC BUNDLE TO UNIVERSE
+                                </button>
+                                <button
+                                    onClick={resetSelection}
+                                    className="px-8 bg-white/5 hover:bg-white/10 text-white/60 py-4 rounded-2xl font-black text-xs transition-all border border-white/5"
+                                >
+                                    ABORT
+                                </button>
+                            </div>
                         </div>
-                    </div>
+                    </motion.div>
+                )}
+            </AnimatePresence>
 
-                    <div className="w-full lg:w-[360px] glass rounded-[40px] overflow-hidden shadow-2xl flex flex-col">
-                        <TaskInbox />
-                    </div>
-                </main>
+            {/* Scroll to Now Button */}
+            <AnimatePresence>
+                {showScrollToNow && (
+                    <motion.button
+                        onClick={scrollToNow}
+                        initial={{ opacity: 0, scale: 0.5 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        exit={{ opacity: 0, scale: 0.5 }}
+                        className="absolute bottom-8 right-8 z-[120] w-14 h-14 rounded-full bg-primary text-white shadow-[0_0_30px_rgba(var(--primary),0.5)] flex items-center justify-center hover:scale-110 active:scale-95 transition-all border-2 border-white/20"
+                    >
+                        <ArrowUp className="w-6 h-6" />
+                    </motion.button>
+                )}
+            </AnimatePresence>
+
+            <div className="flex-1 flex overflow-hidden p-6 gap-6">
+                <div className="w-80 hidden lg:block">
+                    <TaskInbox
+                        tasks={inboxTasks}
+                        onAutoPilot={handleAutoPilot}
+                        onTaskClick={handleTaskClick}
+                    />
+                </div>
+
+                <div className="flex-1 glass-strong rounded-[40px] border border-white/10 overflow-hidden flex flex-col relative bg-black/20">
+                    <AnimatePresence mode="wait">
+                        <motion.main
+                            key={calendarView}
+                            initial={{ opacity: 0, scale: 0.98 }}
+                            animate={{ opacity: 1, scale: 1 }}
+                            exit={{ opacity: 0, scale: 1.02 }}
+                            transition={{ duration: 0.3 }}
+                            className="flex-1 flex flex-col overflow-hidden"
+                        >
+                            {loading && events.length === 0 ? (
+                                <div className="flex-1 flex items-center justify-center">
+                                    <Loader2 className="w-12 h-12 text-primary animate-spin" />
+                                </div>
+                            ) : (
+                                <>
+                                    {calendarView === 'week' && (
+                                        <WeekCalendar
+                                            selectedDate={selectedDate}
+                                            events={events}
+                                            isLocked={isLocked}
+                                            onEventClick={handleEventClick}
+                                            onSlotClick={(date: string, h: number, m: number | undefined, endH: number | undefined, endM: number | undefined) => {
+                                                const newRange: SelectedRange = {
+                                                    type: 'single',
+                                                    startDate: date,
+                                                    endDate: date,
+                                                    startHour: h,
+                                                    startMinute: m || 0,
+                                                    endHour: endH || h + 1,
+                                                    endMinute: endM || 0
+                                                };
+                                                setSelectedRanges(prev => [...prev, newRange]);
+                                                setIsMultiSelectMode(true);
+                                            }}
+                                            onCompleteEvent={handleCompleteEvent}
+                                            onDrop={handleDrop}
+                                        />
+                                    )}
+                                    {calendarView === 'day' && (
+                                        <DayCalendar
+                                            selectedDate={selectedDate}
+                                            events={events}
+                                            isLocked={isLocked}
+                                            onEventClick={handleEventClick}
+                                            onSlotClick={(date: string, h: number, m: number | undefined, endH: number | undefined, endM: number | undefined) => {
+                                                const newRange: SelectedRange = {
+                                                    type: 'single',
+                                                    startDate: date,
+                                                    endDate: date,
+                                                    startHour: h,
+                                                    startMinute: m || 0,
+                                                    endHour: endH || h + 1,
+                                                    endMinute: endM || 0
+                                                };
+                                                setSelectedRanges(prev => [...prev, newRange]);
+                                                setIsMultiSelectMode(true);
+                                            }}
+                                            onCompleteEvent={handleCompleteEvent}
+                                            onDrop={handleDrop}
+                                        />
+                                    )}
+                                    {calendarView === 'month' && (
+                                        <MonthCalendar
+                                            selectedDate={selectedDate}
+                                            events={events}
+                                            onEventClick={handleEventClick}
+                                            onDayClick={(date) => {
+                                                setSelectedDate(date)
+                                                setCalendarView('day')
+                                            }}
+                                            onRangeSelect={(start: string, end: string) => {
+                                                const newRange: SelectedRange = {
+                                                    type: 'range',
+                                                    startDate: start,
+                                                    endDate: end,
+                                                    startHour: 9,
+                                                    startMinute: 0,
+                                                    endHour: 18,
+                                                    endMinute: 0
+                                                };
+                                                setSelectedRanges(prev => [...prev, newRange]);
+                                                setIsMultiSelectMode(true);
+                                            }}
+                                            onCompleteEvent={handleCompleteEvent}
+                                        />
+                                    )}
+                                </>
+                            )}
+                        </motion.main>
+                    </AnimatePresence>
+                </div>
             </div>
 
-            <TaskModal />
-
-            <style dangerouslySetInnerHTML={{
-                __html: `
-                .fc .fc-toolbar-title { font-size: 1.5rem !important; font-weight: 1000 !important; color: #0f172a; tracking: -0.05em; }
-                .fc .fc-button-primary { 
-                    background: #ffffff !important; 
-                    border: 1px solid #e2e8f0 !important; 
-                    color: #64748b !important; 
-                    font-size: 11px !important;
-                    font-weight: 900 !important; 
-                    text-transform: uppercase !important;
-                    padding: 8px 16px !important;
-                    border-radius: 12px !important;
-                    box-shadow: 0 1px 2px rgba(0,0,0,0.05) !important;
-                }
-                .fc .fc-button-primary:hover { border-color: #cbd5e1 !important; color: #0f172a !important; background: #f8fafc !important; }
-                .fc .fc-button-active { background: #0f172a !important; color: white !important; border-color: #0f172a !important; }
-                
-                .fc-timegrid-slot-label-cushion { color: #94a3b8 !important; font-size: 11px !important; font-weight: 800 !important; }
-                .fc-col-header-cell { border-bottom: 2px solid #f1f5f9 !important; }
-                
-                .fc-v-event { background: transparent !important; border: none !important; box-shadow: none !important; border-radius: 12px !important; }
-                .fc-event-main { padding: 0 !important; border-radius: 12px !important; background: transparent !important; }
-                
-                /* Month view unified styling */
-                .month-event-fixed {
-                    height: 24px !important;
-                    max-height: 24px !important;
-                    padding-top: 2px !important;
-                    padding-bottom: 2px !important;
-                    margin-bottom: 2px !important;
-                }
-
-                @keyframes shake {
-                  0% { transform: rotate(0.4deg); }
-                  25% { transform: rotate(-0.4deg); }
-                  50% { transform: rotate(0.4deg); }
-                  75% { transform: rotate(-0.4deg); }
-                  100% { transform: rotate(0.4deg); }
-                }
-                .anim-shake {
-                  animation: shake 0.25s infinite ease-in-out;
-                  cursor: grab !important;
-                }
-
-                .fc-timegrid-allday {
-                    background: #f8fafc !important;
-                    border-bottom: 2px solid #f1f5f9 !important;
-                }
-                .fc-timegrid-allday-frame {
-                    min-height: 60px !important;
-                    max-height: 100px !important;
-                    overflow-y: auto !important;
-                }
-
-                .fc-highlight { 
-                    background: rgba(37, 99, 235, 0.1) !important; 
-                    border: none !important;
-                    border-radius: 12px !important;
-                }
-
-                .fc-now-indicator-line {
-                    border-color: #10b981 !important;
-                    border-top-width: 3px !important;
-                    box-shadow: 0 0 15px rgba(16, 185, 129, 0.4);
-                    z-index: 100 !important;
-                }
-                .fc-viewport-mask {
-                    mask-image: linear-gradient(to bottom, transparent, black 15%, black 85%, transparent);
-                    -webkit-mask-image: linear-gradient(to bottom, transparent, black 15%, black 85%, transparent);
-                }
-
-                .fc-scroller { scrollbar-width: none !important; scroll-behavior: smooth !important; overscroll-behavior: contain; }
-                .fc-scroller::-webkit-scrollbar { display: none !important; }
-
-                .no-scrollbar::-webkit-scrollbar { display: none !important; }
-                .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
-
-                @keyframes check-pop {
-                    0% { transform: scale(0.5); opacity: 0; }
-                    50% { transform: scale(1.1); opacity: 1; }
-                    100% { transform: scale(1); opacity: 0.8; }
-                }
-                .anim-checking {
-                    animation: check-pop 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
-                }
-                `}} />
+            <EventModal
+                open={modalOpen}
+                onClose={() => {
+                    setModalOpen(false)
+                    resetSelection()
+                }}
+                onSave={handleAddEvent}
+                initialDate={slotDate}
+                initialHour={slotHour}
+                initialMinute={slotMinute}
+                editEvent={editEvent}
+            />
         </div>
     )
 }
